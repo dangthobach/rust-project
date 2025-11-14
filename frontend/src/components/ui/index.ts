@@ -3,3 +3,4 @@ export { Card, CardHeader, CardTitle, CardContent, CardFooter } from './Card';
 export { Badge } from './Badge';
 export { Input, Textarea } from './Input';
 export { Spinner } from './Spinner';
+export { StatCard } from './StatCard';
