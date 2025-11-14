@@ -1,0 +1,280 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Neo-Brutalist Design System - Global Styles */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background font-body text-black antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading font-bold uppercase tracking-tight;
+  }
+
+  h1 {
+    @apply text-heading-1;
+  }
+
+  h2 {
+    @apply text-heading-2;
+  }
+
+  h3 {
+    @apply text-heading-3;
+  }
+}
+
+@layer components {
+  /* Brutal Button Styles */
+  .btn {
+    @apply inline-flex items-center justify-center px-6 py-3 font-heading font-bold uppercase;
+    @apply border-3 border-black bg-white text-black shadow-brutal;
+    @apply transition-all duration-150 ease-in-out;
+    @apply hover:-translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg;
+    @apply active:translate-x-0 active:translate-y-0 active:shadow-none;
+    @apply disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-black shadow-brutal hover:shadow-brutal-primary;
+  }
+
+  .btn-secondary {
+    @apply btn bg-secondary text-white shadow-brutal hover:shadow-brutal-secondary;
+  }
+
+  .btn-accent {
+    @apply btn bg-accent-yellow text-black shadow-brutal;
+  }
+
+  .btn-sm {
+    @apply px-4 py-2 text-sm shadow-brutal-sm hover:shadow-brutal;
+  }
+
+  .btn-lg {
+    @apply px-8 py-4 text-lg shadow-brutal-lg hover:shadow-brutal-xl;
+  }
+
+  /* Brutal Card Styles */
+  .card {
+    @apply border-5 border-black bg-white shadow-brutal;
+    @apply transition-all duration-150;
+  }
+
+  .card-hover {
+    @apply card hover:-translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg;
+  }
+
+  .card-primary {
+    @apply card border-primary bg-primary/10;
+  }
+
+  .card-secondary {
+    @apply card border-secondary bg-secondary/10;
+  }
+
+  /* Brutal Input Styles */
+  .input {
+    @apply w-full border-3 border-black bg-white px-4 py-3 font-body;
+    @apply transition-all duration-150;
+    @apply focus:outline-none focus:ring-0 focus:-translate-x-0.5 focus:-translate-y-0.5 focus:shadow-brutal-sm;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .input-error {
+    @apply input border-red-500 bg-red-50;
+  }
+
+  .textarea {
+    @apply input min-h-[120px] resize-y;
+  }
+
+  .select {
+    @apply input appearance-none bg-white;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23000' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+  }
+
+  /* Brutal Checkbox & Radio */
+  .checkbox {
+    @apply h-6 w-6 appearance-none border-3 border-black bg-white;
+    @apply transition-all duration-150;
+    @apply checked:bg-primary checked:shadow-brutal-sm;
+    @apply focus:outline-none focus:ring-0 focus:shadow-brutal-sm;
+    @apply cursor-pointer;
+  }
+
+  .checkbox:checked {
+    background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='black' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
+  }
+
+  /* Brutal Badge */
+  .badge {
+    @apply inline-flex items-center border-2 border-black px-3 py-1 text-xs font-bold uppercase;
+  }
+
+  .badge-primary {
+    @apply badge bg-primary text-black;
+  }
+
+  .badge-secondary {
+    @apply badge bg-secondary text-white;
+  }
+
+  .badge-success {
+    @apply badge bg-green-400 text-black;
+  }
+
+  .badge-warning {
+    @apply badge bg-accent-yellow text-black;
+  }
+
+  .badge-error {
+    @apply badge bg-red-500 text-white;
+  }
+
+  /* Brutal Container */
+  .container-brutal {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Asymmetric Grid */
+  .grid-brutal {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+
+  .grid-brutal-asymmetric {
+    @apply grid gap-4;
+    grid-template-columns: 1fr 2fr 1fr;
+  }
+
+  @media (max-width: 768px) {
+    .grid-brutal-asymmetric {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Divider */
+  .divider-brutal {
+    @apply my-8 h-1 w-full bg-black;
+  }
+
+  /* Alert */
+  .alert {
+    @apply border-5 border-black p-4 shadow-brutal;
+  }
+
+  .alert-info {
+    @apply alert bg-secondary/20;
+  }
+
+  .alert-success {
+    @apply alert bg-green-100;
+  }
+
+  .alert-warning {
+    @apply alert bg-accent-yellow/30;
+  }
+
+  .alert-error {
+    @apply alert bg-red-100;
+  }
+
+  /* Loading Spinner */
+  .spinner {
+    @apply inline-block h-8 w-8 animate-spin border-4 border-black border-t-primary;
+  }
+
+  /* Brutal Table */
+  .table-brutal {
+    @apply w-full border-5 border-black bg-white;
+  }
+
+  .table-brutal thead {
+    @apply bg-neutral-concrete;
+  }
+
+  .table-brutal th {
+    @apply border-3 border-black px-4 py-3 text-left font-heading font-bold uppercase;
+  }
+
+  .table-brutal td {
+    @apply border-3 border-black px-4 py-3;
+  }
+
+  .table-brutal tr:hover {
+    @apply bg-neutral-beige;
+  }
+}
+
+@layer utilities {
+  .text-shadow-brutal {
+    text-shadow: 3px 3px 0px #000000;
+  }
+
+  .transform-brutal {
+    @apply transition-transform duration-150;
+  }
+
+  .transform-brutal:hover {
+    @apply -translate-x-1 -translate-y-1;
+  }
+
+  /* Asymmetric positioning */
+  .asymmetric-1 {
+    @apply relative top-2 left-4;
+  }
+
+  .asymmetric-2 {
+    @apply relative -top-3 right-2;
+  }
+
+  .asymmetric-3 {
+    @apply relative top-6 -left-3;
+  }
+}
+
+/* Animations */
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes bounce-brutal {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+.animate-bounce-brutal {
+  animation: bounce-brutal 0.6s ease-in-out infinite;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Neo-Brutalist CRM",
+  "short_name": "CRM",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E8E3D6",
+  "theme_color": "#00FF00",
+  "description": "A modern, high-performance CRM with Neo-Brutalist design",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

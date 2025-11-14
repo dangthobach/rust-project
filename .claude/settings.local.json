@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(npm run dev)",
+      "Bash(tree:*)",
+      "Bash(cargo --version:*)",
+      "Bash(rustc:*)",
+      "Bash(find:*)",
+      "Bash(where:*)",
+      "Bash(if not exist .env copy .env.example .env)",
+      "Bash(if not exist data mkdir data)",
+      "Bash(if not exist uploads mkdir uploads)",
+      "Bash(cargo build:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
