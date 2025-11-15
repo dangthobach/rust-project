@@ -1,9 +1,10 @@
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Path, Query},
     http::StatusCode,
     response::Json,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -77,7 +78,7 @@ pub struct SearchFilesParams {
 
 /// Create File Handler
 pub async fn create_file(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Json(req): Json<CreateFileRequest>,
 ) -> Result<Json<CreateFileResponse>, (StatusCode, String)> {
@@ -106,7 +107,7 @@ pub async fn create_file(
 
 /// Get File Handler
 pub async fn get_file(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Path(file_id): Path<Uuid>,
 ) -> Result<Json<FileView>, (StatusCode, String)> {
@@ -131,7 +132,7 @@ pub async fn get_file(
 
 /// List Files Handler
 pub async fn list_files(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Query(params): Query<ListFilesParams>,
 ) -> Result<Json<Vec<FileView>>, (StatusCode, String)> {
@@ -152,7 +153,7 @@ pub async fn list_files(
 
 /// Move File Handler
 pub async fn move_file(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Path(file_id): Path<Uuid>,
     Json(req): Json<MoveItemRequest>,
@@ -173,7 +174,7 @@ pub async fn move_file(
 
 /// Delete File Handler
 pub async fn delete_file(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Path(file_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
@@ -192,7 +193,7 @@ pub async fn delete_file(
 
 /// Rename File Handler
 pub async fn rename_file(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Path(file_id): Path<Uuid>,
     Json(req): Json<RenameItemRequest>,
@@ -228,7 +229,7 @@ pub async fn rename_file(
 
 /// Create Folder Handler
 pub async fn create_folder(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Json(req): Json<CreateFolderRequest>,
 ) -> Result<Json<CreateFolderResponse>, (StatusCode, String)> {
@@ -253,7 +254,7 @@ pub async fn create_folder(
 
 /// Get Folder Tree Handler
 pub async fn get_folder_tree(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Path(folder_id): Path<Uuid>,
     Query(params): Query<std::collections::HashMap<String, String>>,
@@ -284,7 +285,7 @@ pub async fn get_folder_tree(
 
 /// Search Files Handler
 pub async fn search_files(
-    State(state): State<HandlerState>,
+    Extension(state): Extension<Arc<HandlerState>>,
     Extension(user_id): Extension<Uuid>,
     Query(params): Query<SearchFilesParams>,
 ) -> Result<Json<Vec<FileView>>, (StatusCode, String)> {

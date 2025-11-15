@@ -13,7 +13,10 @@
       "Bash(if not exist uploads mkdir uploads)",
       "Bash(cargo build:*)",
       "Bash(curl:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(cargo tree:*)",
+      "Bash(timeout 120 cargo build:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

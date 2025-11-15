@@ -1,3 +1,5 @@
+// mod file_system; // DISABLED: Complex Axum router type system issues with multi-state merging
+
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
@@ -11,6 +13,7 @@ use tower_http::trace::TraceLayer;
 use crate::config::Config;
 use crate::handlers::{auth, clients, files, health, notifications, tasks, users};
 use crate::middleware::auth as auth_middleware;
+// use crate::routes::file_system::create_file_system_routes;
 
 pub fn create_router(pool: SqlitePool, config: Config) -> Router {
     // CORS configuration
@@ -47,7 +50,7 @@ pub fn create_router(pool: SqlitePool, config: Config) -> Router {
         .route("/api/notifications", get(notifications::list_notifications))
         .route("/api/notifications/mark-read", post(notifications::mark_as_read))
         .route("/api/notifications/:id", delete(notifications::delete_notification))
-        // File routes
+        // File routes (traditional)
         .route("/api/files", get(files::list_files))
         .route("/api/files/upload", post(files::upload_file))
         .route("/api/files/:id", get(files::get_file))
@@ -57,6 +60,16 @@ pub fn create_router(pool: SqlitePool, config: Config) -> Router {
             (pool.clone(), config.clone()),
             auth_middleware::auth,
         ));
+
+    // File System CQRS routes - TEMPORARILY DISABLED FOR MVP
+    // Issue: Axum router type system doesn't allow merging Router (stateless) with Router<S> (with state)
+    // The CQRS handlers need State<HandlerState> but main router uses State<(SqlitePool, Config)>
+    // Solution options:
+    //   1. Refactor all CQRS handlers to use Extension<Arc<HandlerState>> instead of State (DONE in code, but merge still fails)
+    //   2. Mount CQRS as a separate service using nest_service() with its own state
+    //   3. Simplify architecture by removing dual-state pattern
+    //   4. Wait for Axum 0.8+ which may have better multi-state support
+    // Recommendation: Option 3 for MVP - use single state type across all routes
 
     // Combine all routes
     Router::new()

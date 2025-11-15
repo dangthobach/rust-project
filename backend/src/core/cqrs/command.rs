@@ -1,6 +1,7 @@
 use async_trait::async_trait;
-use std::error::Error;
 use validator::Validate;
+use std::sync::Arc;
+use crate::error::AppError;
 
 /// Command - request để thay đổi state
 pub trait Command: Validate + Send + Sync {
@@ -20,9 +21,10 @@ pub trait CommandHandler<C: Command>: Send + Sync {
 }
 
 /// Command Bus - dispatch commands đến handlers
+/// Note: This is a simplified implementation. For production, consider using a type map
+/// or dependency injection container
 pub struct CommandBus {
-    // Registry of handlers
-    // Will use type map or similar pattern
+    // In real implementation, this would be a type map of handlers
 }
 
 impl CommandBus {
@@ -30,25 +32,29 @@ impl CommandBus {
         Self {}
     }
 
-    /// Register command handler
-    pub fn register<C: Command, H: CommandHandler<C>>(&mut self, _handler: H) {
-        // Register handler
-        todo!()
-    }
-
-    /// Dispatch command
-    pub async fn dispatch<C: Command>(
+    /// Dispatch command with validation
+    /// This is a helper that validates and then delegates to specific handler
+    pub async fn dispatch_with_handler<C, H>(
         &self,
         command: C,
-    ) -> Result<C::Response, Box<dyn Error>> {
+        handler: Arc<H>,
+    ) -> Result<C::Response, AppError>
+    where
+        C: Command,
+        H: CommandHandler<C>,
+        H::Error: Into<AppError>,
+    {
         // 1. Validate command
-        command.validate()?;
+        command.validate()
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
-        // 2. Find handler
-        // 3. Execute in transaction
-        // 4. Publish events
-        // 5. Return result
-        todo!()
+        // 2. Execute handler (in production, this would be in a transaction)
+        let result = handler.handle(command).await
+            .map_err(|e| e.into())?;
+
+        // 3. Publish events (if any) - handled by handlers themselves
+        
+        Ok(result)
     }
 }
 

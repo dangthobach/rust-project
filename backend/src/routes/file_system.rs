@@ -10,55 +10,36 @@ use uuid::Uuid;
 
 use crate::api::file_system::*;
 use crate::config::Config;
-use crate::core::events::{DomainEvent, EventBus, EventEnvelope, EventStream, RedisEventBus};
+use crate::core::events::{EventBus, RedisEventBus};
 use crate::domains::file_system::handlers::HandlerState;
-use async_trait::async_trait;
 
 /// Create file system routes
+/// Returns a stateless Router that can be merged with the main router
 pub fn create_file_system_routes(
     pool: SqlitePool,
     config: Config,
 ) -> Result<Router, anyhow::Error> {
     // Create Redis Event Bus
-    // Wrap EventBusError into anyhow::Error
-    let redis_bus = RedisEventBus::new(&config.redis_url, "file_system_events".to_string())
+    let event_bus = RedisEventBus::new(&config.redis_url, "file_system_events".to_string())
         .map_err(|e| anyhow::anyhow!("Failed to create Redis Event Bus: {}", e))?;
-    
-    // Create wrapper to convert EventBusError to anyhow::Error
-    struct EventBusWrapper {
-        inner: RedisEventBus,
-    }
-    
-    #[async_trait::async_trait]
-    impl EventBus for EventBusWrapper {
-        type Error = anyhow::Error;
-        
-        async fn publish<E: DomainEvent>(&self, event: EventEnvelope<E>) -> Result<(), Self::Error> {
-            self.inner.publish(event).await.map_err(|e| anyhow::anyhow!("{}", e))
-        }
-        
-        async fn subscribe(&self, consumer_group: &str, consumer_name: &str) -> Result<EventStream, Self::Error> {
-            self.inner.subscribe(consumer_group, consumer_name).await.map_err(|e| anyhow::anyhow!("{}", e))
-        }
-    }
-    
-    let event_bus: Arc<dyn EventBus<Error = anyhow::Error> + Send + Sync> =
-        Arc::new(EventBusWrapper { inner: redis_bus });
 
-    // Create handler state
+    let event_bus: Arc<dyn EventBus + Send + Sync> = Arc::new(event_bus);
+
+    // Create handler state and wrap in Arc for Extension
     let handler_state = Arc::new(HandlerState::new(pool.clone(), event_bus));
 
-    // Create routes
-    let routes = Router::new()
-        .route("/api/files", post(create_file))
-        .route("/api/files/:id", get(get_file))
-        .route("/api/files", get(list_files))
-        .route("/api/files/:id/move", put(move_file))
-        .route("/api/files/:id", delete(delete_file))
-        .route("/api/files/:id/rename", put(rename_file))
-        .route("/api/folders", post(create_folder))
-        .route("/api/folders/:id/tree", get(get_folder_tree))
-        .route("/api/files/search", get(search_files))
+    // Create routes WITHOUT state, using Extension for HandlerState
+    let fs_routes = Router::new()
+        .route("/api/fs/files", post(create_file))
+        .route("/api/fs/files/:id", get(get_file))
+        .route("/api/fs/files", get(list_files))
+        .route("/api/fs/files/:id/move", put(move_file))
+        .route("/api/fs/files/:id", delete(delete_file))
+        .route("/api/fs/files/:id/rename", put(rename_file))
+        .route("/api/fs/folders", post(create_folder))
+        .route("/api/fs/folders/:id/tree", get(get_folder_tree))
+        .route("/api/fs/files/search", get(search_files))
+        .layer(Extension(handler_state))
         .layer(axum::middleware::from_fn(
             |mut req: Request, next: Next| async move {
                 // Extract user_id from auth middleware (already set by auth middleware)
@@ -76,9 +57,7 @@ pub fn create_file_system_routes(
                 req.extensions_mut().insert(user_id);
                 next.run(req).await
             },
-        ))
-        .layer(Extension(handler_state.clone()))
-        .with_state(handler_state);
+        ));
 
-    Ok(routes)
+    Ok(fs_routes)
 }

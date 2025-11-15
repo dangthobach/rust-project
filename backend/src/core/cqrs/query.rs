@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use std::error::Error;
+use std::sync::Arc;
+use crate::error::AppError;
 
 /// Query - request để đọc data (không thay đổi state)
 pub trait Query: Send + Sync {
@@ -28,18 +29,23 @@ impl QueryBus {
         Self {}
     }
 
-    /// Register query handler
-    pub fn register<Q: Query, H: QueryHandler<Q>>(&mut self, _handler: H) {
-        // Register handler
-        todo!()
-    }
+    /// Dispatch query with handler
+    pub async fn dispatch_with_handler<Q, H>(
+        &self,
+        query: Q,
+        handler: Arc<H>,
+    ) -> Result<Q::Response, AppError>
+    where
+        Q: Query,
+        H: QueryHandler<Q>,
+        H::Error: Into<AppError>,
+    {
+        // 1. Execute query handler
+        let result = handler.handle(query).await
+            .map_err(|e| e.into())?;
 
-    /// Dispatch query
-    pub async fn dispatch<Q: Query>(&self, _query: Q) -> Result<Q::Response, Box<dyn Error>> {
-        // 1. Find handler
-        // 2. Execute query
-        // 3. Return result
-        todo!()
+        // 2. Return result
+        Ok(result)
     }
 }
 
