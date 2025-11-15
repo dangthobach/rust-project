@@ -9,5 +9,5 @@ pub mod repository;
 pub mod services;
 
 // Re-export only what's needed
-pub use read_models::{FileView, FolderTreeView};
+// pub use read_models::{FileView, FolderTreeView}; // Disabled - PostgreSQL only
 

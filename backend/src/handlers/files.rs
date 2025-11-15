@@ -27,7 +27,7 @@ pub async fn list_files(
 
 pub async fn upload_file(
     Extension(user_id): Extension<String>,
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State((pool, _config)): State<(SqlitePool, Config)>,
     mut multipart: Multipart,
 ) -> AppResult<Json<File>> {
     // Ensure uploads directory exists

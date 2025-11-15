@@ -2,13 +2,36 @@
 
 ## 📋 Tổng quan
 
-Hệ thống được xây dựng với kiến trúc **CQRS (Command Query Responsibility Segregation)** và **Event Sourcing** để:
+Hệ thống được xây dựng với kiến trúc **CQRS (Command Query Responsibility Segregation)** để:
 
-- ✅ Scale đến 30k CCU
-- ✅ Audit trail hoàn chỉnh
-- ✅ Tách biệt read/write models
-- ✅ Rebuild state từ events
-- ✅ Common base cho tất cả entities
+- ✅ Tách biệt read/write operations cho clarity
+- ✅ Validate commands trước khi thực thi
+- ✅ Scalable architecture với clear separation of concerns
+- ✅ Type-safe command/query handling
+- ✅ Common base cho tất cả domains
+
+## 🗄️ Database
+
+**SQLite** được sử dụng cho:
+- ✅ Zero-configuration setup
+- ✅ Embedded database (không cần PostgreSQL server)
+- ✅ ACID transactions
+- ✅ Compile-time query verification với SQLx
+- ✅ Perfect cho development và small-to-medium production deployments
+
+**Note:** FileSystem domain có Event Sourcing implementation với PostgreSQL (hiện đang disabled), có thể enable khi cần scale lớn.
+
+### UUID Storage
+SQLite lưu UUIDs dưới dạng TEXT (36 characters):
+```sql
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,  -- UUID as string
+    email TEXT NOT NULL UNIQUE,
+    ...
+);
+```
+
+Rust models sử dụng `String` thay vì `Uuid` binary type để tương thích.
 
 ## 🎯 Cấu trúc Core Components
 
