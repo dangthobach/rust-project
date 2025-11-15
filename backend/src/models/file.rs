@@ -24,6 +24,7 @@ pub struct FileQuery {
     pub client_id: Option<String>,
     pub task_id: Option<String>,
     pub file_type: Option<String>,
+    pub search: Option<String>,
     pub page: Option<i64>,
     pub limit: Option<i64>,
 }

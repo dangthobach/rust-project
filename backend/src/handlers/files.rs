@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, Query, State},
     Extension,
     Json,
     response::{IntoResponse, Response},
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
-use crate::models::File;
+use crate::models::{File, FileQuery};
 
 pub async fn list_files(
     Extension(_user_id): Extension<String>,
@@ -21,6 +21,35 @@ pub async fn list_files(
     let files = sqlx::query_as::<_, File>("SELECT * FROM files ORDER BY created_at DESC LIMIT 50")
         .fetch_all(&pool)
         .await?;
+
+    Ok(Json(files))
+}
+
+pub async fn search_files(
+    Extension(_user_id): Extension<String>,
+    State((pool, _)): State<(SqlitePool, Config)>,
+    Query(query): Query<FileQuery>,
+) -> AppResult<Json<Vec<File>>> {
+    let search_term = query.search.ok_or_else(|| AppError::ValidationError("Search term required".to_string()))?;
+    let page = query.page.unwrap_or(1);
+    let limit = query.limit.unwrap_or(20);
+    let offset = (page - 1) * limit;
+
+    // Use FTS5 full-text search with MATCH operator
+    let files = sqlx::query_as::<_, File>(
+        r#"
+        SELECT f.* FROM files f
+        INNER JOIN files_fts fts ON f.id = fts.id
+        WHERE files_fts MATCH ?1
+        ORDER BY rank, f.created_at DESC
+        LIMIT ?2 OFFSET ?3
+        "#,
+    )
+    .bind(&search_term)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&pool)
+    .await?;
 
     Ok(Json(files))
 }

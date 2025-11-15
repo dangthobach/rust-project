@@ -49,6 +49,7 @@ pub struct TaskQuery {
     pub priority: Option<String>,
     pub assigned_to: Option<Uuid>,
     pub client_id: Option<Uuid>,
+    pub search: Option<String>,
     pub page: Option<i64>,
     pub limit: Option<i64>,
 }

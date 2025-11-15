@@ -55,6 +55,35 @@ pub async fn list_tasks(
     Ok(Json(tasks))
 }
 
+pub async fn search_tasks(
+    Extension(_user_id): Extension<Uuid>,
+    State((pool, _)): State<(SqlitePool, Config)>,
+    Query(query): Query<TaskQuery>,
+) -> AppResult<Json<Vec<Task>>> {
+    let search_term = query.search.ok_or_else(|| AppError::ValidationError("Search term required".to_string()))?;
+    let page = query.page.unwrap_or(1);
+    let limit = query.limit.unwrap_or(20);
+    let offset = (page - 1) * limit;
+
+    // Use FTS5 full-text search with MATCH operator
+    let tasks = sqlx::query_as::<_, Task>(
+        r#"
+        SELECT t.* FROM tasks t
+        INNER JOIN tasks_fts fts ON t.id = fts.id
+        WHERE tasks_fts MATCH ?1
+        ORDER BY rank, t.created_at DESC
+        LIMIT ?2 OFFSET ?3
+        "#,
+    )
+    .bind(&search_term)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(Json(tasks))
+}
+
 pub async fn create_task(
     Extension(user_id): Extension<Uuid>,
     State((pool, _)): State<(SqlitePool, Config)>,

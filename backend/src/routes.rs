@@ -34,12 +34,14 @@ pub fn create_router(pool: SqlitePool, config: Config) -> Router {
         // Client routes
         .route("/api/clients", get(clients::list_clients))
         .route("/api/clients", post(clients::create_client))
+        .route("/api/clients/search", get(clients::search_clients))
         .route("/api/clients/:id", get(clients::get_client))
         .route("/api/clients/:id", patch(clients::update_client))
         .route("/api/clients/:id", delete(clients::delete_client))
         // Task routes
         .route("/api/tasks", get(tasks::list_tasks))
         .route("/api/tasks", post(tasks::create_task))
+        .route("/api/tasks/search", get(tasks::search_tasks))
         .route("/api/tasks/:id", get(tasks::get_task))
         .route("/api/tasks/:id", patch(tasks::update_task))
         .route("/api/tasks/:id", delete(tasks::delete_task))
@@ -50,6 +52,7 @@ pub fn create_router(pool: SqlitePool, config: Config) -> Router {
         // File routes (traditional)
         .route("/api/files", get(files::list_files))
         .route("/api/files/upload", post(files::upload_file))
+        .route("/api/files/search", get(files::search_files))
         .route("/api/files/:id", get(files::get_file))
         .route("/api/files/:id/download", get(files::download_file))
         .route("/api/files/:id", delete(files::delete_file))

@@ -2,10 +2,13 @@
 
 A high-performance CRM application with Neo-Brutalist design, built with modern web technologies.
 
-> **✅ LATEST UPDATE**: Frontend-backend integration complete! All critical issues fixed (6/7).
+> **✅ LATEST UPDATE**: UUID blocker fixed! Backend roadmap ready.
+> - [Backend Development Roadmap](./BACKEND_ROADMAP.md) 🎯 **NEW!**
+> - [Quick Start Guide - Week 1](./QUICK_START_BACKEND.md) ⚡ **START HERE**
+> - [Visual Timeline](./BACKEND_TIMELINE.md)
+> - [Executive Summary](./BACKEND_SUMMARY.md)
 > - [Critical Issues Fixed Report](./CRITICAL_ISSUES_FIXED.md)
 > - [Testing Guide](./TESTING_GUIDE.md)
-> - [Component Fixes](./COMPONENT_FIXES.md)
 
 ## 🛠️ Tech Stack
 
