@@ -1,6 +1,7 @@
-import { Component, createSignal, For, Show } from 'solid-js';
+import { Component, createSignal, For, Show, createResource } from 'solid-js';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Spinner } from '~/components/ui';
 import { ClientCard, TaskCard, NotificationPanel, DataChart } from '~/components/crm';
+import { api } from '~/lib/api';
 
 interface DashboardStats {
   totalClients: number;
@@ -18,18 +19,29 @@ interface DashboardStats {
 const Dashboard: Component = () => {
   const [loading, setLoading] = createSignal(false);
   const [selectedPeriod, setSelectedPeriod] = createSignal('week');
-  const [stats] = createSignal<DashboardStats>({
-    totalClients: 42,
-    activeClients: 38,
-    totalTasks: 156,
-    completedTasks: 98,
-    pendingTasks: 58,
-    notifications: 12,
-    revenue: 127500,
-    growth: 23.5,
-    activeUsers: 8,
-    filesUploaded: 234,
-  });
+  
+  // Fetch real data from API
+  const [clients] = createResource(() => api.getClients());
+  const [tasks] = createResource(() => api.getTasks());
+  
+  // Calculate stats from real data
+  const stats = () => {
+    const clientsData = clients() || [];
+    const tasksData = tasks() || [];
+    
+    return {
+      totalClients: clientsData.length,
+      activeClients: clientsData.filter((c: any) => c.status === 'active').length,
+      totalTasks: tasksData.length,
+      completedTasks: tasksData.filter((t: any) => t.status === 'completed').length,
+      pendingTasks: tasksData.filter((t: any) => t.status === 'pending').length,
+      notifications: 12,
+      revenue: 127500,
+      growth: 23.5,
+      activeUsers: 8,
+      filesUploaded: 234,
+    };
+  };
 
   const quickActions = [
     { icon: '➕', label: 'New Client', color: 'bg-primary', action: () => console.log('New Client') },
@@ -320,11 +332,34 @@ const Dashboard: Component = () => {
               View All →
             </Button>
           </div>
-          <div class="grid gap-4">
-            <For each={clients()}>
-              {(client) => <ClientCard {...client} />}
-            </For>
-          </div>
+          
+          <Show when={clients.loading}>
+            <div class="flex justify-center p-8">
+              <Spinner />
+            </div>
+          </Show>
+          
+          <Show when={clients.error}>
+            <div class="p-4 bg-red-100 border-4 border-red-500 text-red-700">
+              Error loading clients: {clients.error.message}
+            </div>
+          </Show>
+          
+          <Show when={clients()}>
+            <div class="grid gap-4">
+              <For each={clients()?.slice(0, 3)}>
+                {(client: any) => (
+                  <ClientCard
+                    name={client.name}
+                    email={client.email || ''}
+                    phone={client.phone || ''}
+                    status={client.status}
+                    lastContact={new Date(client.created_at).toLocaleDateString()}
+                  />
+                )}
+              </For>
+            </div>
+          </Show>
         </div>
 
         <div>
@@ -382,11 +417,34 @@ const Dashboard: Component = () => {
             </Badge>
           </div>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <For each={tasks()}>
-            {(task) => <TaskCard {...task} />}
-          </For>
-        </div>
+        
+        <Show when={tasks.loading}>
+          <div class="flex justify-center p-8">
+            <Spinner />
+          </div>
+        </Show>
+        
+        <Show when={tasks.error}>
+          <div class="p-4 bg-red-100 border-4 border-red-500 text-red-700">
+            Error loading tasks: {tasks.error.message}
+          </div>
+        </Show>
+        
+        <Show when={tasks()}>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <For each={tasks()?.slice(0, 4)}>
+              {(task: any) => (
+                <TaskCard
+                  title={task.title}
+                  description={task.description || ''}
+                  priority={task.priority}
+                  dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                  status={task.status}
+                />
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
 
       {/* Analytics */}

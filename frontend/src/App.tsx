@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Notifications from './pages/Notifications';
 import Files from './pages/Files';
 import Login from './pages/Login';
+import ProtectedRoute from './components/ProtectedRoute';
 
 const App: Component = () => {
   return (
@@ -13,25 +14,31 @@ const App: Component = () => {
       <Route
         path="/"
         component={() => (
-          <Layout>
-            <Dashboard />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Dashboard />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/notifications"
         component={() => (
-          <Layout>
-            <Notifications />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Notifications />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/files"
         component={() => (
-          <Layout>
-            <Files />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Files />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
     </>

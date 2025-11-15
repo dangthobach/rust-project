@@ -1,12 +1,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Notification {
-    pub id: Uuid,
-    pub user_id: Uuid,
+    pub id: String,  // SQLite stores UUID as TEXT
+    pub user_id: String,  // SQLite stores UUID as TEXT
     #[sqlx(rename = "type")]
     pub notification_type: String,
     pub title: String,
@@ -19,7 +18,7 @@ pub struct Notification {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)] // Used in API handlers
 pub struct CreateNotificationRequest {
-    pub user_id: Uuid,
+    pub user_id: String,  // SQLite stores UUID as TEXT
     pub notification_type: String,
     pub title: String,
     pub message: String,
@@ -28,5 +27,5 @@ pub struct CreateNotificationRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct MarkAsReadRequest {
-    pub notification_ids: Vec<Uuid>,
+    pub notification_ids: Vec<String>,  // SQLite stores UUID as TEXT
 }

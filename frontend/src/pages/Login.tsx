@@ -1,16 +1,31 @@
-import { Component, createSignal } from 'solid-js';
+import { Component, createSignal, Show } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
-import { Card, CardHeader, CardTitle, CardContent, Input, Button } from '~/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Input, Button, Spinner } from '~/components/ui';
+import { api } from '~/lib/api';
 
 const Login: Component = () => {
   const navigate = useNavigate();
   const [email, setEmail] = createSignal('');
   const [password, setPassword] = createSignal('');
+  const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal('');
 
-  const handleSubmit = (e: Event) => {
+  const handleSubmit = async (e: Event) => {
     e.preventDefault();
-    // Mock login - redirect to dashboard
-    navigate('/');
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await api.login(email(), password());
+      if (response.token) {
+        // Token is already stored in localStorage by api.login()
+        navigate('/');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -25,6 +40,12 @@ const Login: Component = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} class="space-y-4">
+            <Show when={error()}>
+              <div class="p-3 bg-red-100 border-3 border-red-500 text-red-700 text-sm font-bold">
+                {error()}
+              </div>
+            </Show>
+
             <div>
               <label class="block font-heading font-bold uppercase text-sm mb-2">
                 Email
@@ -35,6 +56,7 @@ const Login: Component = () => {
                 value={email()}
                 onInput={(e) => setEmail(e.currentTarget.value)}
                 required
+                disabled={loading()}
               />
             </div>
 
@@ -48,15 +70,19 @@ const Login: Component = () => {
                 value={password()}
                 onInput={(e) => setPassword(e.currentTarget.value)}
                 required
+                disabled={loading()}
               />
             </div>
 
-            <Button type="submit" variant="primary" size="lg" fullWidth>
-              Sign In
+            <Button type="submit" variant="primary" size="lg" fullWidth disabled={loading()}>
+              <Show when={loading()} fallback="Sign In">
+                <Spinner class="inline-block mr-2" />
+                Signing In...
+              </Show>
             </Button>
 
             <p class="text-center text-sm text-neutral-darkGray mt-4">
-              Demo: Use any email/password to login
+              Don't have an account? Contact your administrator.
             </p>
           </form>
         </CardContent>

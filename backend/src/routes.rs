@@ -1,9 +1,7 @@
-// mod file_system; // DISABLED: Complex Axum router type system issues with multi-state merging
-
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use sqlx::SqlitePool;
@@ -13,7 +11,6 @@ use tower_http::trace::TraceLayer;
 use crate::config::Config;
 use crate::handlers::{auth, clients, files, health, notifications, tasks, users};
 use crate::middleware::auth as auth_middleware;
-// use crate::routes::file_system::create_file_system_routes;
 
 pub fn create_router(pool: SqlitePool, config: Config) -> Router {
     // CORS configuration
@@ -56,20 +53,20 @@ pub fn create_router(pool: SqlitePool, config: Config) -> Router {
         .route("/api/files/:id", get(files::get_file))
         .route("/api/files/:id/download", get(files::download_file))
         .route("/api/files/:id", delete(files::delete_file))
+        // File System CQRS routes disabled temporarily (needs PostgreSQL)
+        // .route("/api/fs/files", post(file_system::create_file))
+        // .route("/api/fs/files/:id", get(file_system::get_file))
+        // .route("/api/fs/files", get(file_system::list_files))
+        // .route("/api/fs/files/:id/move", put(file_system::move_file))
+        // .route("/api/fs/files/:id", delete(file_system::delete_file))
+        // .route("/api/fs/files/:id/rename", put(file_system::rename_file))
+        // .route("/api/fs/folders", post(file_system::create_folder))
+        // .route("/api/fs/folders/:id/tree", get(file_system::get_folder_tree))
+        // .route("/api/fs/files/search", get(file_system::search_files))
         .layer(middleware::from_fn_with_state(
             (pool.clone(), config.clone()),
             auth_middleware::auth,
         ));
-
-    // File System CQRS routes - TEMPORARILY DISABLED FOR MVP
-    // Issue: Axum router type system doesn't allow merging Router (stateless) with Router<S> (with state)
-    // The CQRS handlers need State<HandlerState> but main router uses State<(SqlitePool, Config)>
-    // Solution options:
-    //   1. Refactor all CQRS handlers to use Extension<Arc<HandlerState>> instead of State (DONE in code, but merge still fails)
-    //   2. Mount CQRS as a separate service using nest_service() with its own state
-    //   3. Simplify architecture by removing dual-state pattern
-    //   4. Wait for Axum 0.8+ which may have better multi-state support
-    // Recommendation: Option 3 for MVP - use single state type across all routes
 
     // Combine all routes
     Router::new()
