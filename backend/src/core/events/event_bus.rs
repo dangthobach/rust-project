@@ -90,3 +90,41 @@ impl EventBus for RedisEventBus {
         Ok(())
     }
 }
+
+/// In-memory implementation of Event Bus (fallback when Redis unavailable)
+///
+/// This is a simple implementation that logs events but doesn't persist them.
+/// Suitable for development or when Redis is not available.
+pub struct InMemoryEventBus {
+    // Could add a channel here for actual event processing if needed
+}
+
+impl InMemoryEventBus {
+    pub fn new() -> Self {
+        tracing::warn!("⚠️  Using InMemoryEventBus - events will not be persisted!");
+        tracing::warn!("⚠️  For production, please configure Redis for event persistence");
+        Self {}
+    }
+}
+
+impl Default for InMemoryEventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl EventBus for InMemoryEventBus {
+    async fn publish_json(&self, event_json: String) -> Result<(), anyhow::Error> {
+        // Log event for debugging
+        tracing::debug!("📤 Event published (in-memory): {}", event_json);
+
+        // In a real implementation, you might:
+        // - Store events in a Vec with Arc<RwLock<>>
+        // - Send to tokio channels for processing
+        // - Trigger event handlers directly
+
+        // For now, just log and return success
+        Ok(())
+    }
+}
