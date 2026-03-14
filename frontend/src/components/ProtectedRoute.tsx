@@ -10,14 +10,14 @@ const ProtectedRoute: Component<ProtectedRouteProps> = (props) => {
   const navigate = useNavigate();
   
   createEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('access_token');
     if (!token) {
       navigate('/login', { replace: true });
     }
   });
 
   const isAuthenticated = () => {
-    return !!localStorage.getItem('token');
+    return !!localStorage.getItem('access_token');
   };
 
   return (

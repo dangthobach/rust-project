@@ -10,6 +10,7 @@ pub enum AppError {
     Database(sqlx::Error),
     NotFound(String),
     Unauthorized(String),
+    Forbidden(String),
     BadRequest(String),
     InternalServerError(String),
     ValidationError(String),
@@ -25,6 +26,7 @@ impl IntoResponse for AppError {
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
@@ -42,6 +44,18 @@ impl IntoResponse for AppError {
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         AppError::Database(err)
+    }
+}
+
+impl From<bcrypt::BcryptError> for AppError {
+    fn from(err: bcrypt::BcryptError) -> Self {
+        AppError::InternalServerError(format!("Password hashing error: {}", err))
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::InternalServerError(format!("JSON error: {}", err))
     }
 }
 

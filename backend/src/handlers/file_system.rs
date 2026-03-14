@@ -85,11 +85,13 @@ pub struct SearchFilesParams {
 
 /// Create File - Dispatches to CQRS CreateFileCommand
 pub async fn create_file(
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<crate::app_state::AppState>,
     Extension(user_id): Extension<Uuid>,
     Json(req): Json<CreateFileRequest>,
 ) -> Result<Json<CreateFileResponse>, (StatusCode, String)> {
-    let event_bus = build_event_bus(&config)?;
+    let pool = state.pool().clone();
+    let config = state.config();
+    let event_bus = build_event_bus(config)?;
     let service = build_file_service(pool.clone());
     let handler = CreateFileHandler::new(pool, event_bus, service);
 
@@ -157,12 +159,14 @@ pub async fn list_files(
 
 /// Move File - Dispatches to CQRS MoveFileCommand
 pub async fn move_file(
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<crate::app_state::AppState>,
     Extension(user_id): Extension<Uuid>,
     Path(id): Path<Uuid>,
     Json(req): Json<MoveItemRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let event_bus = build_event_bus(&config)?;
+    let pool = state.pool().clone();
+    let config = state.config();
+    let event_bus = build_event_bus(config)?;
     let service = build_file_service(pool.clone());
     let handler = MoveFileHandler::new(pool, event_bus, service);
 
@@ -184,11 +188,13 @@ pub async fn move_file(
 
 /// Delete File - Dispatches to CQRS DeleteFileCommand
 pub async fn delete_file(
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<crate::app_state::AppState>,
     Extension(user_id): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let event_bus = build_event_bus(&config)?;
+    let pool = state.pool().clone();
+    let config = state.config();
+    let event_bus = build_event_bus(config)?;
     let service = build_file_service(pool.clone());
     let handler = DeleteFileHandler::new(pool, event_bus, service);
 
@@ -209,12 +215,14 @@ pub async fn delete_file(
 
 /// Rename File - Dispatches to CQRS RenameFileCommand
 pub async fn rename_file(
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<crate::app_state::AppState>,
     Extension(user_id): Extension<Uuid>,
     Path(id): Path<Uuid>,
     Json(req): Json<RenameItemRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let event_bus = build_event_bus(&config)?;
+    let pool = state.pool().clone();
+    let config = state.config();
+    let event_bus = build_event_bus(config)?;
     let service = build_file_service(pool.clone());
     let handler = RenameFileHandler::new(pool, event_bus, service);
 
@@ -236,11 +244,13 @@ pub async fn rename_file(
 
 /// Create Folder - Dispatches to CQRS CreateFolderCommand
 pub async fn create_folder(
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<crate::app_state::AppState>,
     Extension(user_id): Extension<Uuid>,
     Json(req): Json<CreateFolderRequest>,
 ) -> Result<Json<CreateFolderResponse>, (StatusCode, String)> {
-    let event_bus = build_event_bus(&config)?;
+    let pool = state.pool().clone();
+    let config = state.config();
+    let event_bus = build_event_bus(config)?;
     let service = build_file_service(pool.clone());
     let handler = CreateFolderHandler::new(pool, event_bus, service);
 

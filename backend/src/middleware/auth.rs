@@ -6,14 +6,18 @@ use axum::{
 };
 use sqlx::SqlitePool;
 
+use crate::app_state::AppState;
 use crate::config::Config;
+use crate::models::User;
 use crate::utils::jwt;
 
 pub async fn auth(
-    State((pool, _config)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let pool = state.pool();
+
     // Extract token from Authorization header
     let auth_header = req
         .headers()
@@ -22,29 +26,36 @@ pub async fn auth(
 
     let token = match auth_header {
         Some(header) if header.starts_with("Bearer ") => &header[7..],
-        _ => return Err(StatusCode::UNAUTHORIZED),
+        _ => {
+            tracing::warn!("Missing or invalid Authorization header");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     };
 
     // Verify token
-    let user_id = jwt::verify_token(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user_id = jwt::verify_token(token).map_err(|e| {
+        tracing::warn!("Invalid JWT token: {:?}", e);
+        StatusCode::UNAUTHORIZED
+    })?;
 
-    // Verify user exists and is active
-    let user_exists: Option<i64> = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM users WHERE id = ?1 AND is_active = 1",
-    )
-    .bind(user_id.to_string())
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    let user_exists = user_exists.map(|c| c > 0).unwrap_or(false);
+    // Fetch full user from database
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ? AND is_active = 1")
+        .bind(&user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error fetching user: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    if !user_exists {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    let user = user.ok_or_else(|| {
+        tracing::warn!("User not found or inactive: {}", user_id);
+        StatusCode::UNAUTHORIZED
+    })?;
 
-    // Add user_id to request extensions
+    // Add both user_id (for backward compatibility) and full User object to extensions
     req.extensions_mut().insert(user_id);
+    req.extensions_mut().insert(user);
 
     Ok(next.run(req).await)
 }

@@ -1,0 +1,190 @@
+use axum::{
+    extract::DefaultBodyLimit,
+    middleware,
+    routing::{delete, get, patch, post},
+    Router,
+};
+use sqlx::SqlitePool;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
+
+use crate::api::cqrs_handlers as cqrs; // ✅ Import CQRS handlers
+use crate::app_state::AppState;
+use crate::config::Config;
+use crate::handlers::{activities, admin, analytics, auth, clients, dashboard, export, files, health, notifications, tasks, users, websocket};
+use crate::middleware::{auth as auth_middleware, rate_limit, rbac};
+
+/// Create router with CQRS support (new signature)
+///
+/// This version uses AppState which contains CQRS buses.
+/// Old handlers still use (pool, config) tuple extracted from AppState.
+/// New CQRS handlers use full AppState with CommandBus/QueryBus.
+pub fn create_router_with_state(state: AppState) -> Router {
+    let pool = state.pool().clone();
+    let config = state.config().clone();
+
+    create_router_internal(pool, config, Some(state))
+}
+
+/// Legacy create_router (backward compatible)
+///
+/// Kept for backward compatibility. Does not support CQRS.
+/// Use create_router_with_state() for CQRS support.
+pub fn create_router(pool: SqlitePool, config: Config) -> Router {
+    create_router_internal(pool, config, None)
+}
+
+fn create_router_internal(
+    pool: SqlitePool,
+    config: Config,
+    app_state: Option<AppState>,
+) -> Router {
+    // CORS configuration
+    let cors = CorsLayer::new()
+        .allow_origin(config.cors_origin.parse::<axum::http::HeaderValue>().unwrap())
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    // Rate limiters
+    let auth_limiter = rate_limit::create_auth_limiter();
+    let upload_limiter = rate_limit::create_upload_limiter();
+
+    // Public routes (no auth required) with rate limiting on auth endpoints
+    let auth_routes = Router::new()
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/register", post(auth::register))
+        .route("/api/auth/refresh", post(auth::refresh))
+        .route_layer(middleware::from_fn(move |req, next| {
+            let limiter = auth_limiter.clone();
+            async move { rate_limit::apply_rate_limit(limiter, req, next).await }
+        }));
+
+    let public_routes = Router::new()
+        .route("/health", get(health::health_check))
+        .merge(auth_routes);
+
+    // Protected routes (auth required)
+    // File upload with separate rate limiting
+    let file_upload_routes = Router::new()
+        .route("/api/files/upload", post(files::upload_file))
+        .route_layer(middleware::from_fn(move |req, next| {
+            let limiter = upload_limiter.clone();
+            async move { rate_limit::apply_rate_limit(limiter, req, next).await }
+        }));
+
+    // Auth-protected logout routes
+    let logout_routes = Router::new()
+        .route("/api/auth/logout", post(auth::logout))
+        .route("/api/auth/logout-all", post(auth::logout_all));
+
+    // Manager/Admin only routes (write operations for clients and tasks)
+    // ✅ Use CQRS handlers if AppState available, otherwise legacy handlers
+    let manager_routes = if app_state.is_some() {
+        Router::new()
+            .route("/api/clients", post(cqrs::create_client)) // ✅ CQRS
+            .route("/api/clients/:id", patch(cqrs::update_client)) // ✅ CQRS
+            .route("/api/clients/:id", delete(cqrs::delete_client)) // ✅ CQRS
+            .route("/api/tasks/:id", delete(tasks::delete_task))
+            .route("/api/files/:id", delete(files::delete_file))
+            .route_layer(middleware::from_fn(rbac::require_manager_or_admin))
+    } else {
+        Router::new()
+            .route("/api/clients", post(clients::create_client))
+            .route("/api/clients/:id", patch(clients::update_client))
+            .route("/api/clients/:id", delete(clients::delete_client))
+            .route("/api/tasks/:id", delete(tasks::delete_task))
+            .route("/api/files/:id", delete(files::delete_file))
+            .route_layer(middleware::from_fn(rbac::require_manager_or_admin))
+    };
+
+    // Admin only routes
+    let admin_routes = Router::new()
+        .route("/api/admin/users", get(admin::list_users))
+        .route("/api/admin/users/search", get(admin::search_users))
+        .route("/api/admin/users/stats", get(admin::get_user_stats))
+        .route("/api/admin/users", post(admin::create_user))
+        .route("/api/admin/users/bulk", post(admin::bulk_user_actions))
+        .route("/api/admin/users/:id", patch(admin::update_user_admin))
+        .route("/api/admin/users/:id", delete(admin::delete_user))
+        // Export routes (Admin only)
+        .route("/api/export/users", get(export::export_users))
+        .route("/api/export/dashboard-report", get(export::export_dashboard_report))
+        .route_layer(middleware::from_fn(rbac::require_admin));
+
+    let protected_routes = Router::new()
+        // Auth routes (require authentication)
+        .merge(logout_routes)
+        // User routes (all authenticated users)
+        .route("/api/users/me", get(users::get_current_user))
+        .route("/api/users/profile", get(users::get_user_profile))
+        .route("/api/users/:id", get(users::get_user))
+        .route("/api/users/:id", patch(users::update_user))
+        .route("/api/users/password", post(users::change_password))
+        .route("/api/users/avatar", post(users::upload_avatar))
+        // Dashboard routes
+        .route("/api/dashboard/stats", get(dashboard::get_dashboard_stats))
+        .route("/api/dashboard/activity-feed", get(dashboard::get_activity_feed))
+        .route("/api/dashboard/health", get(dashboard::health_check))
+        // Analytics routes (admin only)
+        .route("/api/analytics/user-activity", get(analytics::get_user_activity_analytics))
+        .route("/api/analytics/task-completion", get(analytics::get_task_completion_analytics))
+        .route("/api/analytics/client-engagement", get(analytics::get_client_engagement_analytics))
+        .route("/api/analytics/storage-usage", get(analytics::get_storage_analytics))
+        // Activity routes - TEMPORARILY DISABLED (needs state fix)
+        // .route("/api/activities", get(activities::get_activities))
+        // .route("/api/activities", post(activities::create_activity))
+        // Client routes (read for all, write for managers/admins)
+        // ✅ CQRS handlers used when AppState available
+        .route("/api/clients", get(cqrs::list_clients))
+        .route("/api/clients/search", get(cqrs::search_clients))
+        .route("/api/clients/:id", get(cqrs::get_client))
+        // Task routes (all users can CRUD own tasks)
+        .route("/api/tasks", get(tasks::list_tasks))
+        .route("/api/tasks", post(tasks::create_task))
+        .route("/api/tasks/search", get(tasks::search_tasks))
+        .route("/api/tasks/:id", get(tasks::get_task))
+        .route("/api/tasks/:id", patch(tasks::update_task))
+        // Notification routes
+        .route("/api/notifications", get(notifications::list_notifications))
+        .route("/api/notifications/mark-read", post(notifications::mark_as_read))
+        .route("/api/notifications/:id", delete(notifications::delete_notification))
+        // File routes (all users can upload/read/download)
+        .route("/api/files", get(files::list_files))
+        .merge(file_upload_routes) // File upload with rate limiting
+        .route("/api/files/search", get(files::search_files))
+        .route("/api/files/:id", get(files::get_file))
+        .route("/api/files/:id/download", get(files::download_file))
+        // Export routes (authenticated users)
+        .route("/api/export/clients", get(export::export_clients))
+        .route("/api/export/tasks", get(export::export_tasks))
+        // WebSocket route - TEMPORARILY DISABLED (needs futures fix)
+        // .route("/api/ws", get(websocket::websocket_handler))
+        // Merge manager-only routes
+        .merge(manager_routes)
+        // Merge admin-only routes
+        .merge(admin_routes)
+        // Apply auth middleware to all protected routes
+        .layer(middleware::from_fn_with_state(
+            (pool.clone(), config.clone()),
+            auth_middleware::auth,
+        ));
+
+    // Combine all routes
+    let router = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .layer(DefaultBodyLimit::max(config.max_file_size))
+        .layer(cors)
+        .layer(TraceLayer::new_for_http());
+
+    // ✅ Wire state based on what's available
+    if let Some(state) = app_state {
+        // CQRS mode: Use AppState
+        tracing::info!("✅ Routes configured with CQRS/Event Sourcing support");
+        router.with_state(state)
+    } else {
+        // Legacy mode: Use (pool, config) tuple
+        tracing::info!("⚠️ Routes configured in legacy mode (no CQRS)");
+        router.with_state((pool, config))
+    }
+}
