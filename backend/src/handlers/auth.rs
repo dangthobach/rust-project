@@ -89,6 +89,28 @@ pub async fn register(
 
     tracing::info!(user_id = %user.id, role = %user.role, "User registered successfully");
 
+    // Async jobs + domain event fanout
+    let welcome_job = serde_json::json!({
+        "job": "email.welcome",
+        "user_id": user.id,
+        "email": user.email
+    });
+    let _ = state
+        .rabbitmq_publisher
+        .publish("crm.jobs", "email.welcome", &welcome_job.to_string())
+        .await;
+
+    let domain_event = serde_json::json!({
+        "event_type": "UserRegistered",
+        "user_id": user.id,
+        "email": user.email,
+        "occurred_at": chrono::Utc::now().to_rfc3339()
+    });
+    let _ = state
+        .kafka_publisher
+        .publish("crm.domain.user", &user.id, &domain_event.to_string())
+        .await;
+
     Ok((
         StatusCode::CREATED,
         Json(AuthResponse {

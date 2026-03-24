@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod api;
 mod app_state;
 mod authz;
@@ -6,6 +8,7 @@ mod core;
 mod domains;
 mod error;
 mod handlers;
+mod integrations;
 mod middleware;
 mod models;
 mod routes;

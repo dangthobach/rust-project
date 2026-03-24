@@ -5,4 +5,3 @@ pub mod events;
 
 pub use commands::*;
 pub use queries::*;
-pub use events::*;

@@ -1,11 +1,13 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::core::cqrs::{CommandHandler, QueryHandler};
+use crate::core::shared::append_aggregate_history;
 use crate::domains::users::{
     RegisterUserCommand, UpdateUserCommand, ChangePasswordCommand, DeleteUserCommand,
-    GetUserQuery, GetUserByEmailQuery, GetUserByUsernameQuery, ListUsersQuery,
+    GetUserQuery, GetUserByEmailQuery, ListUsersQuery,
 };
 use crate::error::AppError;
 use crate::models::User;
@@ -29,11 +31,8 @@ impl CommandHandler<RegisterUserCommand> for RegisterUserHandler {
 
     async fn handle(&self, command: RegisterUserCommand) -> Result<User, Self::Error> {
         // Check if user already exists
-        let existing = sqlx::query_as::<_, User>(
-            "SELECT * FROM users WHERE email = ? OR username = ?"
-        )
+        let existing = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
         .bind(&command.email)
-        .bind(&command.username)
         .fetch_optional(&*self.pool)
         .await?;
 
@@ -43,21 +42,40 @@ impl CommandHandler<RegisterUserCommand> for RegisterUserHandler {
 
         // Hash password
         let password_hash = password::hash_password(&command.password)?;
+        let user_id = Uuid::new_v4().to_string();
+        let role = command.role.unwrap_or_else(|| "user".to_string());
 
         // Create user
         let user = sqlx::query_as::<_, User>(
             r#"
-            INSERT INTO users (username, email, password_hash, full_name, role)
+            INSERT INTO users (id, email, password_hash, full_name, role)
             VALUES (?, ?, ?, ?, ?)
             RETURNING *
             "#,
         )
-        .bind(&command.username)
+        .bind(&user_id)
         .bind(&command.email)
         .bind(&password_hash)
         .bind(&command.full_name)
-        .bind(command.role.unwrap_or_else(|| "user".to_string()))
+        .bind(&role)
         .fetch_one(&*self.pool)
+        .await?;
+
+        append_aggregate_history(
+            &self.pool,
+            "user",
+            &user.id,
+            "CREATE",
+            None,
+            Some(&role),
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role
+            })),
+        )
         .await?;
 
         Ok(user)
@@ -79,43 +97,72 @@ impl CommandHandler<UpdateUserCommand> for UpdateUserHandler {
     type Error = AppError;
 
     async fn handle(&self, command: UpdateUserCommand) -> Result<User, Self::Error> {
-        let mut query = String::from("UPDATE users SET ");
-        let mut updates = Vec::new();
-        let mut bind_count = 0;
-
-        if command.email.is_some() {
-            updates.push("email = ?");
-            bind_count += 1;
-        }
-        if command.full_name.is_some() {
-            updates.push("full_name = ?");
-            bind_count += 1;
-        }
-        if command.role.is_some() {
-            updates.push("role = ?");
-            bind_count += 1;
-        }
-
-        if bind_count == 0 {
+        if command.email.is_none()
+            && command.full_name.is_none()
+            && command.avatar_url.is_none()
+            && command.role.is_none()
+        {
             return Err(AppError::ValidationError("No fields to update".to_string()));
         }
 
-        query.push_str(&updates.join(", "));
-        query.push_str(&format!(" WHERE id = {} RETURNING *", command.id));
+        let before = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(&command.id)
+            .fetch_optional(&*self.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-        let mut q = sqlx::query_as::<_, User>(&query);
-        
-        if let Some(email) = command.email {
-            q = q.bind(email);
-        }
-        if let Some(full_name) = command.full_name {
-            q = q.bind(full_name);
-        }
-        if let Some(role) = command.role {
-            q = q.bind(role);
-        }
+        let mut qb = QueryBuilder::<Sqlite>::new("UPDATE users SET ");
+        let mut separated = qb.separated(", ");
 
-        let user = q.fetch_one(&*self.pool).await?;
+        if let Some(email) = &command.email {
+            separated.push("email = ").push_bind(email);
+        }
+        if let Some(full_name) = &command.full_name {
+            separated.push("full_name = ").push_bind(full_name);
+        }
+        if let Some(avatar_url) = &command.avatar_url {
+            separated.push("avatar_url = ").push_bind(avatar_url);
+        }
+        if let Some(role) = &command.role {
+            separated.push("role = ").push_bind(role);
+        }
+        separated.push("updated_at = datetime('now')");
+        drop(separated);
+
+        qb.push(" WHERE id = ").push_bind(&command.id);
+        qb.build().execute(&*self.pool).await?;
+
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(&command.id)
+            .fetch_one(&*self.pool)
+            .await?;
+
+        append_aggregate_history(
+            &self.pool,
+            "user",
+            &user.id,
+            "UPDATE",
+            Some(&before.role),
+            Some(&user.role),
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "before": {
+                    "email": before.email,
+                    "full_name": before.full_name,
+                    "avatar_url": before.avatar_url,
+                    "role": before.role
+                },
+                "after": {
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "avatar_url": user.avatar_url,
+                    "role": user.role
+                }
+            })),
+        )
+        .await?;
+
         Ok(user)
     }
 }
@@ -137,7 +184,7 @@ impl CommandHandler<ChangePasswordCommand> for ChangePasswordHandler {
     async fn handle(&self, command: ChangePasswordCommand) -> Result<(), Self::Error> {
         // Get current user
         let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-            .bind(command.user_id)
+            .bind(&command.user_id)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
@@ -153,9 +200,24 @@ impl CommandHandler<ChangePasswordCommand> for ChangePasswordHandler {
         // Update password
         sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
             .bind(&new_password_hash)
-            .bind(command.user_id)
+            .bind(&command.user_id)
             .execute(&*self.pool)
             .await?;
+
+        append_aggregate_history(
+            &self.pool,
+            "user",
+            &command.user_id,
+            "PASSWORD_CHANGE",
+            None,
+            None,
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "password_changed": true
+            })),
+        )
+        .await?;
 
         Ok(())
     }
@@ -176,8 +238,30 @@ impl CommandHandler<DeleteUserCommand> for DeleteUserHandler {
     type Error = AppError;
 
     async fn handle(&self, command: DeleteUserCommand) -> Result<(), Self::Error> {
+        let existing = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(&command.id)
+            .fetch_optional(&*self.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+        append_aggregate_history(
+            &self.pool,
+            "user",
+            &command.id,
+            "DELETE",
+            Some(&existing.role),
+            None,
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "email": existing.email,
+                "full_name": existing.full_name
+            })),
+        )
+        .await?;
+
         let result = sqlx::query("DELETE FROM users WHERE id = ?")
-            .bind(command.id)
+            .bind(&command.id)
             .execute(&*self.pool)
             .await?;
 
@@ -207,7 +291,7 @@ impl QueryHandler<GetUserQuery> for GetUserHandler {
 
     async fn handle(&self, query: GetUserQuery) -> Result<Option<User>, Self::Error> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-            .bind(query.id)
+            .bind(&query.id)
             .fetch_optional(&*self.pool)
             .await?;
 
@@ -239,30 +323,6 @@ impl QueryHandler<GetUserByEmailQuery> for GetUserByEmailHandler {
     }
 }
 
-pub struct GetUserByUsernameHandler {
-    pool: Arc<SqlitePool>,
-}
-
-impl GetUserByUsernameHandler {
-    pub fn new(pool: Arc<SqlitePool>) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait]
-impl QueryHandler<GetUserByUsernameQuery> for GetUserByUsernameHandler {
-    type Error = AppError;
-
-    async fn handle(&self, query: GetUserByUsernameQuery) -> Result<Option<User>, Self::Error> {
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = ?")
-            .bind(query.username)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(user)
-    }
-}
-
 pub struct ListUsersHandler {
     pool: Arc<SqlitePool>,
 }
@@ -278,26 +338,27 @@ impl QueryHandler<ListUsersQuery> for ListUsersHandler {
     type Error = AppError;
 
     async fn handle(&self, query: ListUsersQuery) -> Result<Vec<User>, Self::Error> {
-        let mut sql = String::from("SELECT * FROM users");
-        
-        if let Some(role) = &query.role {
-            sql.push_str(&format!(" WHERE role = '{}'", role));
-        }
-        
-        sql.push_str(" ORDER BY created_at DESC");
-        
-        if let Some(limit) = query.limit {
-            sql.push_str(&format!(" LIMIT {}", limit));
-        }
-        
-        if let Some(offset) = query.offset {
-            sql.push_str(&format!(" OFFSET {}", offset));
-        }
+        let limit = query.limit.unwrap_or(50).max(1);
+        let offset = query.offset.unwrap_or(0).max(0);
 
-        let users = sqlx::query_as::<_, User>(&sql)
+        let users = if let Some(role) = query.role {
+            sqlx::query_as::<_, User>(
+                "SELECT * FROM users WHERE role = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            )
+            .bind(role)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&*self.pool)
-            .await?;
+            .await?
+        } else {
+            sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?")
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&*self.pool)
+                .await?
+        };
 
         Ok(users)
     }
 }
+

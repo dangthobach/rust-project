@@ -5,9 +5,7 @@ use axum::{
     Extension,
 };
 use serde::Deserialize;
-use sqlx::SqlitePool;
 
-use crate::config::Config;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::{Client, Task, User};
@@ -22,7 +20,7 @@ pub struct ExportParams {
 
 /// Export clients to CSV/JSON
 pub async fn export_clients(
-    Extension(_user_id): Extension<String>,
+    Extension(user_id): Extension<String>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
@@ -50,6 +48,15 @@ pub async fn export_clients(
         .await?;
 
     let format = params.format.as_deref().unwrap_or("csv");
+    let export_job = serde_json::json!({
+        "job": "report.export.clients",
+        "requested_by": user_id,
+        "format": format
+    });
+    let _ = state
+        .rabbitmq_publisher
+        .publish("crm.jobs", "report.export.clients", &export_job.to_string())
+        .await;
 
     match format {
         "csv" => {
@@ -100,7 +107,7 @@ pub async fn export_clients(
 
 /// Export tasks to CSV/JSON
 pub async fn export_tasks(
-    Extension(_user_id): Extension<String>,
+    Extension(user_id): Extension<String>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
@@ -127,6 +134,15 @@ pub async fn export_tasks(
         .await?;
 
     let format = params.format.as_deref().unwrap_or("csv");
+    let export_job = serde_json::json!({
+        "job": "report.export.tasks",
+        "requested_by": user_id,
+        "format": format
+    });
+    let _ = state
+        .rabbitmq_publisher
+        .publish("crm.jobs", "report.export.tasks", &export_job.to_string())
+        .await;
 
     match format {
         "csv" => {
@@ -180,7 +196,7 @@ pub async fn export_tasks(
 
 /// Export users to CSV/JSON (Admin only)
 pub async fn export_users(
-    Extension(_user_id): Extension<String>,
+    Extension(user_id): Extension<String>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
@@ -199,6 +215,15 @@ pub async fn export_users(
         .await?;
 
     let format = params.format.as_deref().unwrap_or("csv");
+    let export_job = serde_json::json!({
+        "job": "report.export.users",
+        "requested_by": user_id,
+        "format": format
+    });
+    let _ = state
+        .rabbitmq_publisher
+        .publish("crm.jobs", "report.export.users", &export_job.to_string())
+        .await;
 
     match format {
         "csv" => {
@@ -248,7 +273,7 @@ pub async fn export_users(
 
 /// Export dashboard stats report
 pub async fn export_dashboard_report(
-    Extension(_user_id): Extension<String>,
+    Extension(user_id): Extension<String>,
     State(state): State<AppState>,
 ) -> AppResult<impl IntoResponse> {
     let pool = state.pool();
@@ -313,6 +338,15 @@ pub async fn export_dashboard_report(
             }
         }
     });
+
+    let export_job = serde_json::json!({
+        "job": "report.export.dashboard",
+        "requested_by": user_id
+    });
+    let _ = state
+        .rabbitmq_publisher
+        .publish("crm.jobs", "report.export.dashboard", &export_job.to_string())
+        .await;
 
     Ok((
         [(

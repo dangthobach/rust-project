@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Get User by ID Query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetUserQuery {
-    pub id: i32,
+    pub id: String,
 }
 
 impl Query for GetUserQuery {
@@ -27,20 +27,6 @@ impl Query for GetUserByEmailQuery {
 
     fn query_name(&self) -> &'static str {
         "GetUserByEmail"
-    }
-}
-
-/// Get User by Username Query
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetUserByUsernameQuery {
-    pub username: String,
-}
-
-impl Query for GetUserByUsernameQuery {
-    type Response = Option<User>;
-
-    fn query_name(&self) -> &'static str {
-        "GetUserByUsername"
     }
 }
 

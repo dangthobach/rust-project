@@ -2,8 +2,8 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
+    Extension,
 };
-use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::app_state::AppState;
@@ -29,10 +29,12 @@ use crate::models::Client;
 /// 4. Handler executes DB write + publishes ClientCreatedEvent
 /// 5. Return created client
 pub async fn create_client(
+    Extension(actor_id): Extension<String>,
     State(state): State<AppState>,
-    Json(payload): Json<CreateClientCommand>,
+    Json(mut payload): Json<CreateClientCommand>,
 ) -> AppResult<Json<Client>> {
     tracing::debug!("Creating client via CQRS: {:?}", payload);
+    payload.actor_id = Some(actor_id);
 
     // 1. Create handler with dependencies (pool + event_bus)
     let handler = Arc::new(CreateClientHandler::new(
@@ -46,6 +48,17 @@ pub async fn create_client(
         .dispatch_with_handler(payload, handler)
         .await?;
 
+    let event = serde_json::json!({
+        "event_type": "ClientCreated",
+        "client_id": client.id,
+        "status": client.status,
+        "occurred_at": chrono::Utc::now().to_rfc3339()
+    });
+    let _ = state
+        .kafka_publisher
+        .publish("crm.domain.client", &client.id.to_string(), &event.to_string())
+        .await;
+
     tracing::info!("Client created successfully: {}", client.id);
 
     Ok(Json(client))
@@ -58,14 +71,16 @@ pub async fn create_client(
 /// - Validates all updates
 /// - Publishes ClientUpdatedEvent with change map
 pub async fn update_client(
+    Extension(actor_id): Extension<String>,
     State(state): State<AppState>,
-    Path(id): Path<i32>,
+    Path(id): Path<String>,
     Json(mut payload): Json<UpdateClientCommand>,
 ) -> AppResult<Json<Client>> {
     tracing::debug!("Updating client {} via CQRS", id);
 
     // Inject ID from path into command
     payload.id = id;
+    payload.actor_id = Some(actor_id);
 
     let handler = Arc::new(UpdateClientHandler::new(
         state.pool.clone(),
@@ -76,6 +91,17 @@ pub async fn update_client(
         .command_bus
         .dispatch_with_handler(payload, handler)
         .await?;
+
+    let event = serde_json::json!({
+        "event_type": "ClientUpdated",
+        "client_id": client.id,
+        "status": client.status,
+        "occurred_at": chrono::Utc::now().to_rfc3339()
+    });
+    let _ = state
+        .kafka_publisher
+        .publish("crm.domain.client", &client.id.to_string(), &event.to_string())
+        .await;
 
     tracing::info!("Client updated successfully: {}", client.id);
 
@@ -89,12 +115,13 @@ pub async fn update_client(
 /// - Publishes ClientDeletedEvent before deletion
 /// - Returns 204 No Content on success
 pub async fn delete_client(
+    Extension(actor_id): Extension<String>,
     State(state): State<AppState>,
-    Path(id): Path<i32>,
+    Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
     tracing::debug!("Deleting client {} via CQRS", id);
 
-    let command = DeleteClientCommand { id };
+    let command = DeleteClientCommand { id: id.clone(), actor_id: Some(actor_id) };
 
     let handler = Arc::new(DeleteClientHandler::new(
         state.pool.clone(),
@@ -105,6 +132,16 @@ pub async fn delete_client(
         .command_bus
         .dispatch_with_handler(command, handler)
         .await?;
+
+    let event = serde_json::json!({
+        "event_type": "ClientDeleted",
+        "client_id": id,
+        "occurred_at": chrono::Utc::now().to_rfc3339()
+    });
+    let _ = state
+        .kafka_publisher
+        .publish("crm.domain.client", event["client_id"].as_str().unwrap_or(""), &event.to_string())
+        .await;
 
     tracing::info!("Client deleted successfully: {}", id);
 
@@ -119,11 +156,11 @@ pub async fn delete_client(
 /// - Returns 404 if not found
 pub async fn get_client(
     State(state): State<AppState>,
-    Path(id): Path<i32>,
+    Path(id): Path<String>,
 ) -> AppResult<Json<Client>> {
     tracing::debug!("Getting client {} via CQRS", id);
 
-    let query = GetClientQuery { id };
+    let query = GetClientQuery { id: id.clone() };
 
     let handler = Arc::new(GetClientHandler::new(state.pool.clone()));
 
@@ -198,8 +235,6 @@ pub async fn search_clients(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Integration tests will be added in Week 2 Day 4-5
     // These tests require:
     // 1. Test database setup

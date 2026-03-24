@@ -1,9 +1,7 @@
 use axum::{extract::State, Extension, Json};
 use axum::extract::{Path, Query};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 
-use crate::config::Config;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::User;

@@ -5,7 +5,7 @@ use axum::{
     extract::Request,
     http::StatusCode,
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};

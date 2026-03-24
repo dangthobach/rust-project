@@ -6,17 +6,16 @@ use validator::Validate;
 /// Register User Command (Sign up)
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct RegisterUserCommand {
-    #[validate(length(min = 3, max = 100))]
-    pub username: String,
-    
     #[validate(email)]
     pub email: String,
     
     #[validate(length(min = 6))]
     pub password: String,
     
-    pub full_name: Option<String>,
+    #[validate(length(min = 2, max = 255))]
+    pub full_name: String,
     pub role: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for RegisterUserCommand {
@@ -30,13 +29,16 @@ impl Command for RegisterUserCommand {
 /// Update User Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateUserCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
     
     #[validate(email)]
     pub email: Option<String>,
     
     pub full_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub role: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for UpdateUserCommand {
@@ -50,13 +52,15 @@ impl Command for UpdateUserCommand {
 /// Change Password Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct ChangePasswordCommand {
-    pub user_id: i32,
+    #[validate(length(min = 1))]
+    pub user_id: String,
     
     #[validate(length(min = 6))]
     pub old_password: String,
     
     #[validate(length(min = 6))]
     pub new_password: String,
+    pub actor_id: Option<String>,
 }
 
 impl Command for ChangePasswordCommand {
@@ -70,7 +74,9 @@ impl Command for ChangePasswordCommand {
 /// Delete User Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct DeleteUserCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
+    pub actor_id: Option<String>,
 }
 
 impl Command for DeleteUserCommand {

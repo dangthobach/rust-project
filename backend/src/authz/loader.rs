@@ -63,3 +63,8 @@ pub async fn load_effective_permissions(
 pub fn invalidate_permission_cache(user_id: Uuid) {
     PERMISSION_CACHE.remove(&user_id);
 }
+
+/// Use when role/permission definitions changed and impact many users.
+pub fn invalidate_all_permission_cache() {
+    PERMISSION_CACHE.clear();
+}

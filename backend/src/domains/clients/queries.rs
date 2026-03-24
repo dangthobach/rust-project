@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Get Client by ID Query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetClientQuery {
-    pub id: i32,
+    pub id: String,
 }
 
 impl Query for GetClientQuery {
@@ -20,6 +20,7 @@ impl Query for GetClientQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListClientsQuery {
     pub status: Option<String>,
+    pub assigned_to: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }

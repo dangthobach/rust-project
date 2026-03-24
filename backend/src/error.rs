@@ -59,4 +59,10 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
+impl From<Box<dyn std::error::Error + Send + Sync>> for AppError {
+    fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        AppError::InternalServerError(err.to_string())
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;

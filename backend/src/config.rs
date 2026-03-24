@@ -12,6 +12,14 @@ pub struct Config {
     pub max_file_size: usize,
     pub upload_dir: String,
     pub redis_url: String,
+    pub kafka_brokers: String,
+    pub rabbitmq_url: String,
+    pub object_storage_provider: String,
+    pub object_storage_endpoint: String,
+    pub object_storage_bucket: String,
+    pub object_storage_access_key: String,
+    pub object_storage_secret_key: String,
+    pub default_tenant_id: String,
 }
 
 impl Config {
@@ -38,6 +46,22 @@ impl Config {
                 .unwrap_or_else(|_| "./uploads".to_string()),
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
+            kafka_brokers: std::env::var("KAFKA_BROKERS")
+                .unwrap_or_else(|_| "".to_string()),
+            rabbitmq_url: std::env::var("RABBITMQ_URL")
+                .unwrap_or_else(|_| "".to_string()),
+            object_storage_provider: std::env::var("OBJECT_STORAGE_PROVIDER")
+                .unwrap_or_else(|_| "local".to_string()),
+            object_storage_endpoint: std::env::var("OBJECT_STORAGE_ENDPOINT")
+                .unwrap_or_else(|_| "".to_string()),
+            object_storage_bucket: std::env::var("OBJECT_STORAGE_BUCKET")
+                .unwrap_or_else(|_| "crm-objects".to_string()),
+            object_storage_access_key: std::env::var("OBJECT_STORAGE_ACCESS_KEY")
+                .unwrap_or_else(|_| "".to_string()),
+            object_storage_secret_key: std::env::var("OBJECT_STORAGE_SECRET_KEY")
+                .unwrap_or_else(|_| "".to_string()),
+            default_tenant_id: std::env::var("DEFAULT_TENANT_ID")
+                .unwrap_or_else(|_| "public".to_string()),
         };
 
         Ok(config)

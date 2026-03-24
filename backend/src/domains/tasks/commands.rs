@@ -11,13 +11,14 @@ pub struct CreateTaskCommand {
     
     pub description: Option<String>,
     
-    #[validate(length(min = 1))]
-    pub status: String,
+    pub status: Option<String>,
     
     pub priority: Option<String>,
-    pub assigned_to: Option<i32>,
-    pub client_id: Option<i32>,
+    pub assigned_to: Option<String>,
+    pub client_id: Option<String>,
     pub due_date: Option<String>,
+    pub created_by: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for CreateTaskCommand {
@@ -31,7 +32,8 @@ impl Command for CreateTaskCommand {
 /// Update Task Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateTaskCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
     
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
@@ -39,9 +41,10 @@ pub struct UpdateTaskCommand {
     pub description: Option<String>,
     pub status: Option<String>,
     pub priority: Option<String>,
-    pub assigned_to: Option<i32>,
-    pub client_id: Option<i32>,
+    pub assigned_to: Option<String>,
+    pub client_id: Option<String>,
     pub due_date: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for UpdateTaskCommand {
@@ -55,7 +58,9 @@ impl Command for UpdateTaskCommand {
 /// Delete Task Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct DeleteTaskCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
+    pub actor_id: Option<String>,
 }
 
 impl Command for DeleteTaskCommand {
@@ -69,7 +74,9 @@ impl Command for DeleteTaskCommand {
 /// Complete Task Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CompleteTaskCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
+    pub actor_id: Option<String>,
 }
 
 impl Command for CompleteTaskCommand {

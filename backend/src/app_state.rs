@@ -4,6 +4,10 @@ use crate::core::cqrs::{CommandBus, QueryBus};
 use crate::core::events::{EventBus, PostgresEventStore, RedisEventBus, InMemoryEventBus};
 use crate::config::Config;
 use crate::handlers::websocket::WsConnectionManager;
+use crate::integrations::{
+    KafkaPublisher, KafkaPublisherAdapter, LocalObjectStorage, NoopKafkaPublisher, NoopRabbitMqPublisher,
+    ObjectStorage, RabbitMqPublisher, RabbitMqPublisherAdapter, S3CompatibleObjectStorage,
+};
 
 /// Application State - Centralized dependency injection container
 ///
@@ -35,6 +39,15 @@ pub struct AppState {
 
     /// Application configuration
     pub config: Arc<Config>,
+
+    /// Kafka publisher (event streaming integration)
+    pub kafka_publisher: Arc<dyn KafkaPublisher + Send + Sync>,
+
+    /// RabbitMQ publisher (queue/workflow integration)
+    pub rabbitmq_publisher: Arc<dyn RabbitMqPublisher + Send + Sync>,
+
+    /// Object storage integration (local or s3-compatible)
+    pub object_storage: Arc<dyn ObjectStorage + Send + Sync>,
 }
 
 impl AppState {
@@ -89,7 +102,38 @@ impl AppState {
         let ws_manager = Arc::new(WsConnectionManager::new());
         tracing::info!("✅ WebSocket Connection Manager initialized");
 
-        // 6. Build AppState
+        // 6. Initialize Kafka publisher (adapter with noop fallback)
+        let kafka_publisher: Arc<dyn KafkaPublisher + Send + Sync> =
+            if config.kafka_brokers.trim().is_empty() {
+                tracing::warn!("⚠️  KAFKA_BROKERS not configured, using NoopKafkaPublisher");
+                Arc::new(NoopKafkaPublisher)
+            } else {
+                Arc::new(KafkaPublisherAdapter::new(config.kafka_brokers.clone()))
+            };
+
+        // 7. Initialize RabbitMQ publisher (adapter with noop fallback)
+        let rabbitmq_publisher: Arc<dyn RabbitMqPublisher + Send + Sync> =
+            if config.rabbitmq_url.trim().is_empty() {
+                tracing::warn!("⚠️  RABBITMQ_URL not configured, using NoopRabbitMqPublisher");
+                Arc::new(NoopRabbitMqPublisher)
+            } else {
+                Arc::new(RabbitMqPublisherAdapter::new(config.rabbitmq_url.clone()))
+            };
+
+        // 8. Initialize Object Storage (local or s3-compatible adapter)
+        let object_storage: Arc<dyn ObjectStorage + Send + Sync> =
+            if config.object_storage_provider.eq_ignore_ascii_case("s3")
+                || config.object_storage_provider.eq_ignore_ascii_case("minio")
+            {
+                Arc::new(S3CompatibleObjectStorage::new(
+                    config.object_storage_endpoint.clone(),
+                    config.object_storage_bucket.clone(),
+                ))
+            } else {
+                Arc::new(LocalObjectStorage::new(config.upload_dir.clone()))
+            };
+
+        // 9. Build AppState
         let state = Self {
             pool: Arc::new(pool),
             command_bus,
@@ -98,6 +142,9 @@ impl AppState {
             event_bus,
             ws_manager,
             config: Arc::new(config),
+            kafka_publisher,
+            rabbitmq_publisher,
+            object_storage,
         };
 
         tracing::info!("✅ AppState initialized successfully");
@@ -139,6 +186,18 @@ impl AppState {
         &self.ws_manager
     }
 
+    pub fn kafka_publisher(&self) -> &Arc<dyn KafkaPublisher + Send + Sync> {
+        &self.kafka_publisher
+    }
+
+    pub fn rabbitmq_publisher(&self) -> &Arc<dyn RabbitMqPublisher + Send + Sync> {
+        &self.rabbitmq_publisher
+    }
+
+    pub fn object_storage(&self) -> &Arc<dyn ObjectStorage + Send + Sync> {
+        &self.object_storage
+    }
+
     /// Test connections (for health checks)
     pub async fn health_check(&self) -> anyhow::Result<()> {
         // Test database connection
@@ -157,6 +216,21 @@ impl AppState {
             .publish_json(test_event.to_string())
             .await
             .map_err(|e| anyhow::anyhow!("Redis health check failed: {}", e))?;
+
+        self.kafka_publisher
+            .health_check()
+            .await
+            .map_err(|e| anyhow::anyhow!("Kafka health check failed: {}", e))?;
+
+        self.rabbitmq_publisher
+            .health_check()
+            .await
+            .map_err(|e| anyhow::anyhow!("RabbitMQ health check failed: {}", e))?;
+
+        self.object_storage
+            .health_check()
+            .await
+            .map_err(|e| anyhow::anyhow!("Object storage health check failed: {}", e))?;
 
         Ok(())
     }
@@ -188,6 +262,14 @@ mod tests {
             max_file_size: 10485760,
             upload_dir: "./uploads".to_string(),
             redis_url: "redis://127.0.0.1:6379".to_string(),
+            kafka_brokers: "".to_string(),
+            rabbitmq_url: "".to_string(),
+            object_storage_provider: "local".to_string(),
+            object_storage_endpoint: "".to_string(),
+            object_storage_bucket: "crm-objects".to_string(),
+            object_storage_access_key: "".to_string(),
+            object_storage_secret_key: "".to_string(),
+            default_tenant_id: "public".to_string(),
         };
 
         // Create AppState (will fallback to InMemoryEventBus if Redis not available)

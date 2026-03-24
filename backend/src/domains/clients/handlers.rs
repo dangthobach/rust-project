@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::core::cqrs::{CommandHandler, QueryHandler};
 use crate::core::events::{EventBus, EventBusExt, EventEnvelope, EventMetadata};
+use crate::core::shared::append_aggregate_history;
 use crate::domains::clients::{
     CreateClientCommand, UpdateClientCommand, DeleteClientCommand,
     GetClientQuery, ListClientsQuery, SearchClientsQuery,
@@ -32,22 +33,48 @@ impl CommandHandler<CreateClientCommand> for CreateClientHandler {
     type Error = AppError;
 
     async fn handle(&self, command: CreateClientCommand) -> Result<Client, Self::Error> {
+        let status = normalize_status(command.status.as_deref())?;
+        if let Some(assigned_to) = &command.assigned_to {
+            validate_user_exists(&self.pool, assigned_to).await?;
+        }
+
+        let client_id = Uuid::new_v4().to_string();
         // 1. Execute the command (database write)
-        let status = command.status.clone().unwrap_or_else(|| "active".to_string());
         let client = sqlx::query_as::<_, Client>(
             r#"
-            INSERT INTO clients (name, email, phone, address, company, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO clients (id, name, email, phone, address, company, position, status, assigned_to, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             "#,
         )
+        .bind(&client_id)
         .bind(&command.name)
         .bind(&command.email)
         .bind(&command.phone)
         .bind(&command.address)
         .bind(&command.company)
+        .bind(&command.position)
         .bind(&status)
+        .bind(&command.assigned_to)
+        .bind(&command.notes)
         .fetch_one(&*self.pool)
+        .await?;
+
+        append_aggregate_history(
+            &self.pool,
+            "client",
+            &client.id.to_string(),
+            "CREATE",
+            None,
+            Some(client.status.as_str()),
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "name": client.name,
+                "email": client.email,
+                "assigned_to": client.assigned_to
+            })),
+        )
         .await?;
 
         // 2. Create domain event
@@ -114,65 +141,93 @@ impl CommandHandler<UpdateClientCommand> for UpdateClientHandler {
             .await?
             .ok_or_else(|| AppError::NotFound("Client not found".to_string()))?;
 
-        // 2. Build dynamic update query
-        let mut query = String::from("UPDATE clients SET ");
-        let mut updates = Vec::new();
-        let mut bind_count = 0;
-
-        if command.name.is_some() {
-            updates.push("name = ?");
-            bind_count += 1;
-        }
-        if command.email.is_some() {
-            updates.push("email = ?");
-            bind_count += 1;
-        }
-        if command.phone.is_some() {
-            updates.push("phone = ?");
-            bind_count += 1;
-        }
-        if command.address.is_some() {
-            updates.push("address = ?");
-            bind_count += 1;
-        }
-        if command.company.is_some() {
-            updates.push("company = ?");
-            bind_count += 1;
-        }
-        if command.status.is_some() {
-            updates.push("status = ?");
-            bind_count += 1;
-        }
-
-        if bind_count == 0 {
+        if command.name.is_none()
+            && command.email.is_none()
+            && command.phone.is_none()
+            && command.address.is_none()
+            && command.company.is_none()
+            && command.position.is_none()
+            && command.status.is_none()
+            && command.assigned_to.is_none()
+            && command.notes.is_none()
+        {
             return Err(AppError::ValidationError("No fields to update".to_string()));
         }
 
-        query.push_str(&updates.join(", "));
-        query.push_str(&format!(" WHERE id = {} RETURNING *", command.id));
-
-        let mut q = sqlx::query_as::<_, Client>(&query);
-
-        if let Some(ref name) = command.name {
-            q = q.bind(name);
-        }
-        if let Some(ref email) = command.email {
-            q = q.bind(email);
-        }
-        if let Some(ref phone) = command.phone {
-            q = q.bind(phone);
-        }
-        if let Some(ref address) = command.address {
-            q = q.bind(address);
-        }
-        if let Some(ref company) = command.company {
-            q = q.bind(company);
-        }
-        if let Some(ref status) = command.status {
-            q = q.bind(status);
+        if let Some(assigned_to) = &command.assigned_to {
+            validate_user_exists(&self.pool, assigned_to).await?;
         }
 
-        let client = q.fetch_one(&*self.pool).await?;
+        let mut qb = QueryBuilder::<Sqlite>::new("UPDATE clients SET ");
+        let mut separated = qb.separated(", ");
+
+        if let Some(v) = &command.name {
+            separated.push("name = ").push_bind(v);
+        }
+        if let Some(v) = &command.email {
+            separated.push("email = ").push_bind(v);
+        }
+        if let Some(v) = &command.phone {
+            separated.push("phone = ").push_bind(v);
+        }
+        if let Some(v) = &command.address {
+            separated.push("address = ").push_bind(v);
+        }
+        if let Some(v) = &command.company {
+            separated.push("company = ").push_bind(v);
+        }
+        if let Some(v) = &command.position {
+            separated.push("position = ").push_bind(v);
+        }
+        if let Some(v) = &command.status {
+            separated
+                .push("status = ")
+                .push_bind(normalize_status(Some(v.as_str()))?);
+        }
+        if let Some(v) = &command.assigned_to {
+            separated.push("assigned_to = ").push_bind(v);
+        }
+        if let Some(v) = &command.notes {
+            separated.push("notes = ").push_bind(v);
+        }
+        separated.push("updated_at = datetime('now')");
+        drop(separated);
+
+        qb.push(" WHERE id = ").push_bind(&command.id);
+        qb.build().execute(&*self.pool).await?;
+
+        let client = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = ?")
+            .bind(&command.id)
+            .fetch_one(&*self.pool)
+            .await?;
+
+        append_aggregate_history(
+            &self.pool,
+            "client",
+            &client.id.to_string(),
+            "UPDATE",
+            Some(original.status.as_str()),
+            Some(client.status.as_str()),
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "before": {
+                    "name": original.name,
+                    "email": original.email,
+                    "phone": original.phone,
+                    "status": original.status,
+                    "assigned_to": original.assigned_to
+                },
+                "after": {
+                    "name": client.name,
+                    "email": client.email,
+                    "phone": client.phone,
+                    "status": client.status,
+                    "assigned_to": client.assigned_to
+                }
+            })),
+        )
+        .await?;
 
         // 3. Create change map (only changed fields)
         let mut changes = serde_json::Map::new();
@@ -260,9 +315,25 @@ impl CommandHandler<DeleteClientCommand> for DeleteClientHandler {
 
         // 2. Delete from database
         let result = sqlx::query("DELETE FROM clients WHERE id = ?")
-            .bind(command.id)
+            .bind(&command.id)
             .execute(&*self.pool)
             .await?;
+        append_aggregate_history(
+            &self.pool,
+            "client",
+            &client.id.to_string(),
+            "DELETE",
+            Some(client.status.as_str()),
+            None,
+            command.actor_id.as_deref(),
+            None,
+            Some(serde_json::json!({
+                "name": client.name,
+                "email": client.email
+            })),
+        )
+        .await?;
+
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("Client not found".to_string()));
@@ -321,7 +392,7 @@ impl QueryHandler<GetClientQuery> for GetClientHandler {
 
     async fn handle(&self, query: GetClientQuery) -> Result<Option<Client>, Self::Error> {
         let client = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = ?")
-            .bind(query.id)
+            .bind(&query.id)
             .fetch_optional(&*self.pool)
             .await?;
 
@@ -344,23 +415,34 @@ impl QueryHandler<ListClientsQuery> for ListClientsHandler {
     type Error = AppError;
 
     async fn handle(&self, query: ListClientsQuery) -> Result<Vec<Client>, Self::Error> {
-        let mut sql = String::from("SELECT * FROM clients");
+        let mut qb = QueryBuilder::<Sqlite>::new("SELECT * FROM clients");
+        let mut has_where = false;
 
         if let Some(status) = &query.status {
-            sql.push_str(&format!(" WHERE status = '{}'", status));
+            if !has_where {
+                qb.push(" WHERE ");
+                has_where = true;
+            } else {
+                qb.push(" AND ");
+            }
+            qb.push("status = ").push_bind(normalize_status(Some(status.as_str()))?);
         }
 
-        sql.push_str(" ORDER BY created_at DESC");
-
-        if let Some(limit) = query.limit {
-            sql.push_str(&format!(" LIMIT {}", limit));
+        if let Some(assigned_to) = &query.assigned_to {
+            if !has_where {
+                qb.push(" WHERE ");
+            } else {
+                qb.push(" AND ");
+            }
+            qb.push("assigned_to = ").push_bind(assigned_to);
         }
 
-        if let Some(offset) = query.offset {
-            sql.push_str(&format!(" OFFSET {}", offset));
-        }
+        qb.push(" ORDER BY created_at DESC");
+        qb.push(" LIMIT ").push_bind(query.limit.unwrap_or(50).max(1));
+        qb.push(" OFFSET ").push_bind(query.offset.unwrap_or(0).max(0));
 
-        let clients = sqlx::query_as::<_, Client>(&sql)
+        let clients = qb
+            .build_query_as::<Client>()
             .fetch_all(&*self.pool)
             .await?;
 
@@ -384,7 +466,7 @@ impl QueryHandler<SearchClientsQuery> for SearchClientsHandler {
 
     async fn handle(&self, query: SearchClientsQuery) -> Result<Vec<Client>, Self::Error> {
         let search = format!("%{}%", query.search_term);
-        let limit = query.limit.unwrap_or(50);
+        let limit = query.limit.unwrap_or(50).max(1);
 
         let clients = sqlx::query_as::<_, Client>(
             r#"
@@ -403,4 +485,25 @@ impl QueryHandler<SearchClientsQuery> for SearchClientsHandler {
 
         Ok(clients)
     }
+}
+
+fn normalize_status(status: Option<&str>) -> Result<String, AppError> {
+    let value = status.unwrap_or("active").to_ascii_lowercase();
+    match value.as_str() {
+        "active" | "inactive" | "prospect" | "customer" => Ok(value),
+        _ => Err(AppError::ValidationError("Invalid client status".to_string())),
+    }
+}
+
+async fn validate_user_exists(pool: &SqlitePool, user_id: &str) -> Result<(), AppError> {
+    Uuid::parse_str(user_id)
+        .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    if exists == 0 {
+        return Err(AppError::ValidationError("Assigned user not found".to_string()));
+    }
+    Ok(())
 }

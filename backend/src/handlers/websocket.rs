@@ -4,7 +4,6 @@ use axum::{
         State,
     },
     response::Response,
-    Extension,
 };
 use futures::{
     stream::{SplitSink, SplitStream},
@@ -194,7 +193,7 @@ async fn handle_incoming(
                 match serde_json::from_str::<WsMessage>(&text) {
                     Ok(ws_msg) => {
                         match ws_msg {
-                            WsMessage::Auth { data } => {
+                            WsMessage::Auth { data: _data } => {
                                 // TODO: Validate token
                                 // For now, extract user_id from token (simplified)
                                 let extracted_user_id = "user_123".to_string(); // TODO: Real JWT validation
@@ -218,7 +217,7 @@ async fn handle_incoming(
                                 
                                 info!("User {} authenticated via WebSocket", extracted_user_id);
                             }
-                            WsMessage::Heartbeat { data } => {
+                            WsMessage::Heartbeat { data: _data } => {
                                 // Respond to heartbeat
                                 let response = WsMessage::Heartbeat {
                                     data: HeartbeatData {

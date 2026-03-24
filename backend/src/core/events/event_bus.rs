@@ -75,7 +75,7 @@ impl RedisEventBus {
 #[async_trait]
 impl EventBus for RedisEventBus {
     async fn publish_json(&self, event_json: String) -> Result<(), anyhow::Error> {
-        let mut conn = self.client.get_async_connection().await
+        let mut conn = self.client.get_multiplexed_async_connection().await
             .map_err(|e| anyhow::anyhow!("Redis connection error: {}", e))?;
         
         // Publish to Redis Stream

@@ -52,7 +52,7 @@ async-trait = "0.1"
 dashmap = "5.5"
 
 # Redis for Event Bus
-redis = { version = "0.24", features = ["tokio-comp", "streams"] }
+redis = { version = "0.32.5", features = ["tokio-comp", "streams"] }
 
 # Additional utilities
 itertools = "0.12"

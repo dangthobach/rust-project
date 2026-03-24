@@ -6,7 +6,6 @@ use axum::{
     Extension, Json,
 };
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -197,12 +196,6 @@ pub async fn upload_file(
 
     tracing::info!(user_id = %ctx.user_id, "File upload initiated");
 
-    let upload_dir = "uploads";
-    fs::create_dir_all(upload_dir).await.map_err(|e| {
-        tracing::error!("Failed to create upload directory: {}", e);
-        AppError::InternalServerError(format!("Failed to create upload directory: {}", e))
-    })?;
-
     let mut file_name: Option<String> = None;
     let mut file_field_consumed = false;
     let mut buf: Vec<u8> = Vec::new();
@@ -271,23 +264,29 @@ pub async fn upload_file(
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
-    let stored_name = if !extension.is_empty() {
+    let object_name = if !extension.is_empty() {
         format!("{}_{}.{}", file_id, Uuid::new_v4().simple(), extension)
     } else {
         format!("{}_{}", file_id, Uuid::new_v4().simple())
     };
 
-    let file_path = format!("{}/{}", upload_dir, stored_name);
-
-    let mut dst = fs::File::create(&file_path).await.map_err(|e| {
-        tracing::error!("Failed to create file on disk: {}", e);
-        AppError::InternalServerError(format!("Failed to create file: {}", e))
-    })?;
-
-    dst.write_all(&buf).await.map_err(|e| {
-        tracing::error!("Failed to write file data: {}", e);
-        AppError::InternalServerError(format!("Failed to write file: {}", e))
-    })?;
+    use chrono::Datelike;
+    let now = chrono::Utc::now();
+    let tenant_id = state.config().default_tenant_id.clone();
+    let object_key = format!(
+        "{}/{}/{:04}/{:02}/{:02}/{}",
+        tenant_id,
+        ctx.user_id,
+        now.year(),
+        now.month(),
+        now.day(),
+        object_name
+    );
+    let file_path = state
+        .object_storage
+        .put_object(&object_key, &buf, &file_type)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Object storage put failed: {}", e)))?;
 
     let file_size = buf.len() as i64;
 
@@ -297,7 +296,7 @@ pub async fn upload_file(
          RETURNING *"#,
     )
     .bind(&file_id)
-    .bind(&stored_name)
+    .bind(&object_name)
     .bind(&safe_filename)
     .bind(&file_path)
     .bind(&file_type)
@@ -308,6 +307,30 @@ pub async fn upload_file(
 
     match file_record {
         Ok(rec) => {
+            let thumb_job = serde_json::json!({
+                "job": "thumbnail.generate",
+                "file_id": rec.id,
+                "object_key": object_key,
+                "file_type": rec.file_type
+            });
+            let _ = state
+                .rabbitmq_publisher
+                .publish("crm.jobs", "thumbnail.generate", &thumb_job.to_string())
+                .await;
+
+            let domain_event = serde_json::json!({
+                "event_type": "FileUploaded",
+                "file_id": rec.id,
+                "uploaded_by": rec.uploaded_by,
+                "file_type": rec.file_type,
+                "file_size": rec.file_size,
+                "occurred_at": chrono::Utc::now().to_rfc3339()
+            });
+            let _ = state
+                .kafka_publisher
+                .publish("crm.domain.file", &rec.id, &domain_event.to_string())
+                .await;
+
             tracing::info!(
                 file_id = %rec.id,
                 original_name = %safe_filename,
@@ -317,7 +340,6 @@ pub async fn upload_file(
             Ok(Json(rec))
         }
         Err(e) => {
-            let _ = fs::remove_file(&file_path).await;
             Err(e.into())
         }
     }
@@ -364,6 +386,15 @@ pub async fn download_file(
 
     if !can_download_file(&ctx, &file) {
         return Err(AppError::NotFound("File not found".to_string()));
+    }
+
+    if !file.file_path.starts_with("./")
+        && !file.file_path.starts_with("uploads/")
+        && !file.file_path.contains(":\\")
+    {
+        return Err(AppError::BadRequest(
+            "Direct download for external object storage is not enabled yet".to_string(),
+        ));
     }
 
     let disk = fs::File::open(&file.file_path).await.map_err(|e| {
@@ -415,7 +446,12 @@ pub async fn delete_file(
         .execute(pool)
         .await?;
 
-    let _ = fs::remove_file(&file.file_path).await;
+    if file.file_path.starts_with("./")
+        || file.file_path.starts_with("uploads/")
+        || file.file_path.contains(":\\")
+    {
+        let _ = fs::remove_file(&file.file_path).await;
+    }
 
     Ok(Json(serde_json::json!({"message": "File deleted successfully"})))
 }

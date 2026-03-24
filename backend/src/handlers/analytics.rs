@@ -7,9 +7,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 
-use crate::config::Config;
 use crate::app_state::AppState;
 use crate::error::AppError;
 

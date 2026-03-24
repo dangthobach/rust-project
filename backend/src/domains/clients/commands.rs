@@ -10,16 +10,20 @@ pub struct CreateClientCommand {
     pub name: String,
     
     #[validate(email)]
-    pub email: String,
+    pub email: Option<String>,
     
     #[validate(length(min = 1, max = 50))]
-    pub phone: String,
+    pub phone: Option<String>,
     
     #[validate(length(max = 500))]
     pub address: Option<String>,
     
     pub company: Option<String>,
+    pub position: Option<String>,
     pub status: Option<String>,
+    pub assigned_to: Option<String>,
+    pub notes: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for CreateClientCommand {
@@ -33,7 +37,8 @@ impl Command for CreateClientCommand {
 /// Update Client Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateClientCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
     
     #[validate(length(min = 1, max = 255))]
     pub name: Option<String>,
@@ -48,7 +53,11 @@ pub struct UpdateClientCommand {
     pub address: Option<String>,
     
     pub company: Option<String>,
+    pub position: Option<String>,
     pub status: Option<String>,
+    pub assigned_to: Option<String>,
+    pub notes: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 impl Command for UpdateClientCommand {
@@ -62,7 +71,9 @@ impl Command for UpdateClientCommand {
 /// Delete Client Command
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct DeleteClientCommand {
-    pub id: i32,
+    #[validate(length(min = 1))]
+    pub id: String,
+    pub actor_id: Option<String>,
 }
 
 impl Command for DeleteClientCommand {

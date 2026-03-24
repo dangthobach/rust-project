@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Get Task by ID Query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetTaskQuery {
-    pub id: i32,
+    pub id: String,
 }
 
 impl Query for GetTaskQuery {
@@ -20,8 +20,9 @@ impl Query for GetTaskQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListTasksQuery {
     pub status: Option<String>,
-    pub assigned_to: Option<i32>,
-    pub client_id: Option<i32>,
+    pub assigned_to: Option<String>,
+    pub client_id: Option<String>,
+    pub priority: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -37,7 +38,7 @@ impl Query for ListTasksQuery {
 /// Get Tasks by User Query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetTasksByUserQuery {
-    pub user_id: i32,
+    pub user_id: String,
     pub status: Option<String>,
 }
 
@@ -52,7 +53,7 @@ impl Query for GetTasksByUserQuery {
 /// Get Tasks by Client Query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetTasksByClientQuery {
-    pub client_id: i32,
+    pub client_id: String,
 }
 
 impl Query for GetTasksByClientQuery {
