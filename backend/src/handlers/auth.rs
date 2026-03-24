@@ -29,19 +29,28 @@ pub async fn register(
     let password_hash = password::hash(&payload.password)
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-    // Create user (SQLite doesn't support RETURNING, use last_insert_rowid)
+    // Create user — self-service registration is always `user` (ignore payload.role for privilege).
     let user_id = uuid::Uuid::new_v4();
     sqlx::query(
         r#"
         INSERT INTO users (id, email, password_hash, full_name, role)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+        VALUES (?1, ?2, ?3, ?4, 'user')
         "#,
     )
     .bind(user_id.to_string())
     .bind(&payload.email)
     .bind(&password_hash)
     .bind(&payload.full_name)
-    .bind(payload.role.unwrap_or_else(|| "user".to_string()))
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO user_roles (user_id, role_id)
+        SELECT ?1, r.id FROM roles r WHERE r.slug = 'user' LIMIT 1
+        "#,
+    )
+    .bind(user_id.to_string())
     .execute(&pool)
     .await?;
 

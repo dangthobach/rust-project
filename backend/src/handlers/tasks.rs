@@ -3,12 +3,13 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::authz::AuthContext;
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateTaskRequest, Task, TaskQuery, UpdateTaskRequest};
 
 pub async fn list_tasks(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Query(query): Query<TaskQuery>,
 ) -> AppResult<Json<Vec<Task>>> {
@@ -56,7 +57,7 @@ pub async fn list_tasks(
 }
 
 pub async fn search_tasks(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Query(query): Query<TaskQuery>,
 ) -> AppResult<Json<Vec<Task>>> {
@@ -85,7 +86,7 @@ pub async fn search_tasks(
 }
 
 pub async fn create_task(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Json(payload): Json<CreateTaskRequest>,
 ) -> AppResult<Json<Task>> {
@@ -106,7 +107,7 @@ pub async fn create_task(
     .bind(payload.assigned_to.map(|id| id.to_string()))
     .bind(payload.client_id.map(|id| id.to_string()))
     .bind(payload.due_date.map(|d| d.to_rfc3339()))
-    .bind(user_id.to_string())
+    .bind(ctx.user_id.to_string())
     .execute(&pool)
     .await?;
 
@@ -119,7 +120,7 @@ pub async fn create_task(
 }
 
 pub async fn get_task(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<Task>> {
@@ -133,7 +134,7 @@ pub async fn get_task(
 }
 
 pub async fn update_task(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     Json(payload): Json<UpdateTaskRequest>,
@@ -174,7 +175,7 @@ pub async fn update_task(
 }
 
 pub async fn delete_task(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {

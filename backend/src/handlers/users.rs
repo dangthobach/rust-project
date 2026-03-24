@@ -2,16 +2,17 @@ use axum::{extract::State, Extension, Json};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::authz::AuthContext;
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models::{UpdateUserRequest, User};
 
 pub async fn get_current_user(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
 ) -> AppResult<Json<User>> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
-        .bind(user_id.to_string())
+        .bind(ctx.user_id.to_string())
         .fetch_optional(&pool)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
@@ -20,7 +21,7 @@ pub async fn get_current_user(
 }
 
 pub async fn get_user(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<User>> {
@@ -34,13 +35,13 @@ pub async fn get_user(
 }
 
 pub async fn update_user(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     Json(payload): Json<UpdateUserRequest>,
 ) -> AppResult<Json<User>> {
     // Only allow users to update their own profile (or add admin check later)
-    if user_id != id {
+    if ctx.user_id != id {
         return Err(AppError::Unauthorized("Cannot update other users".to_string()));
     }
 

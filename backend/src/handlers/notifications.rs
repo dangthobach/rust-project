@@ -2,18 +2,19 @@ use axum::{extract::State, Extension, Json};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use crate::authz::AuthContext;
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models::{MarkAsReadRequest, Notification};
 
 pub async fn list_notifications(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
 ) -> AppResult<Json<Vec<Notification>>> {
     let notifications = sqlx::query_as::<_, Notification>(
         "SELECT * FROM notifications WHERE user_id = ?1 ORDER BY created_at DESC LIMIT 50"
     )
-    .bind(user_id.to_string())
+    .bind(ctx.user_id.to_string())
     .fetch_all(&pool)
     .await?;
 
@@ -21,7 +22,7 @@ pub async fn list_notifications(
 }
 
 pub async fn mark_as_read(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Json(payload): Json<MarkAsReadRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -41,7 +42,7 @@ pub async fn mark_as_read(
     for id in &payload.notification_ids {
         query = query.bind(id.to_string());
     }
-    query = query.bind(user_id.to_string());
+    query = query.bind(ctx.user_id.to_string());
     query
     .execute(&pool)
     .await?;
@@ -50,13 +51,13 @@ pub async fn mark_as_read(
 }
 
 pub async fn delete_notification(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let result = sqlx::query("DELETE FROM notifications WHERE id = ?1 AND user_id = ?2")
         .bind(id.to_string())
-        .bind(user_id.to_string())
+        .bind(ctx.user_id.to_string())
         .execute(&pool)
         .await?;
 

@@ -1,4 +1,5 @@
 mod api;
+mod authz;
 mod config;
 mod core;
 mod domains;

@@ -3,12 +3,13 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::authz::AuthContext;
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models::{Client, ClientQuery, CreateClientRequest, UpdateClientRequest};
 
 pub async fn list_clients(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Query(query): Query<ClientQuery>,
 ) -> AppResult<Json<Vec<Client>>> {
@@ -53,7 +54,7 @@ pub async fn list_clients(
 }
 
 pub async fn search_clients(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Query(query): Query<ClientQuery>,
 ) -> AppResult<Json<Vec<Client>>> {
@@ -82,7 +83,7 @@ pub async fn search_clients(
 }
 
 pub async fn create_client(
-    Extension(user_id): Extension<Uuid>,
+    Extension(ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     Json(payload): Json<CreateClientRequest>,
 ) -> AppResult<Json<Client>> {
@@ -103,7 +104,7 @@ pub async fn create_client(
     .bind(&payload.position)
     .bind(&payload.address)
     .bind(payload.status.unwrap_or_else(|| "active".to_string()))
-    .bind(payload.assigned_to.or(Some(user_id)).map(|id| id.to_string()))
+    .bind(payload.assigned_to.or(Some(ctx.user_id)).map(|id| id.to_string()))
     .bind(&payload.notes)
     .execute(&pool)
     .await?;
@@ -117,7 +118,7 @@ pub async fn create_client(
 }
 
 pub async fn get_client(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<Client>> {
@@ -131,7 +132,7 @@ pub async fn get_client(
 }
 
 pub async fn update_client(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     Json(payload): Json<UpdateClientRequest>,
@@ -174,7 +175,7 @@ pub async fn update_client(
 }
 
 pub async fn delete_client(
-    Extension(_user_id): Extension<Uuid>,
+    Extension(_ctx): Extension<AuthContext>,
     State((pool, _)): State<(SqlitePool, Config)>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
