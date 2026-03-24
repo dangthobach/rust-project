@@ -1,31 +1,21 @@
 import { Component, createSignal, Show } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
 import { Card, CardHeader, CardTitle, CardContent, Input, Button, Spinner } from '~/components/ui';
-import { api } from '~/lib/api';
+import { useLogin } from '~/lib/hooks';
 
 const Login: Component = () => {
-  const navigate = useNavigate();
-  const [email, setEmail] = createSignal('');
-  const [password, setPassword] = createSignal('');
-  const [loading, setLoading] = createSignal(false);
-  const [error, setError] = createSignal('');
+  const [email, setEmail] = createSignal('test@example.com');
+  const [password, setPassword] = createSignal('test123');
+  
+  const login = useLogin();
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await api.login(email(), password());
-      if (response.token) {
-        // Token is already stored in localStorage by api.login()
-        navigate('/');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Login failed. Please try again.');
-    } finally {
-      setLoading(false);
+    
+    if (!email() || !password()) {
+      return;
     }
+
+    login.mutate({ email: email(), password: password() });
   };
 
   return (
@@ -40,9 +30,9 @@ const Login: Component = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} class="space-y-4">
-            <Show when={error()}>
+            <Show when={login.isError}>
               <div class="p-3 bg-red-100 border-3 border-red-500 text-red-700 text-sm font-bold">
-                {error()}
+                {login.error?.message || 'Login failed. Please try again.'}
               </div>
             </Show>
 
@@ -56,7 +46,7 @@ const Login: Component = () => {
                 value={email()}
                 onInput={(e) => setEmail(e.currentTarget.value)}
                 required
-                disabled={loading()}
+                disabled={login.isPending}
               />
             </div>
 
@@ -70,18 +60,25 @@ const Login: Component = () => {
                 value={password()}
                 onInput={(e) => setPassword(e.currentTarget.value)}
                 required
-                disabled={loading()}
+                disabled={login.isPending}
               />
             </div>
 
-            <Button type="submit" variant="primary" size="lg" fullWidth disabled={loading()}>
-              <Show when={loading()} fallback="Sign In">
+            <Button 
+              type="submit" 
+              variant="primary" 
+              size="lg" 
+              fullWidth 
+              disabled={login.isPending}
+            >
+              <Show when={login.isPending} fallback="Sign In">
                 <Spinner class="inline-block mr-2" />
                 Signing In...
               </Show>
             </Button>
 
             <p class="text-center text-sm text-neutral-darkGray mt-4">
+              Demo: test@example.com / test123<br />
               Don't have an account? Contact your administrator.
             </p>
           </form>

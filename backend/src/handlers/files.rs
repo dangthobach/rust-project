@@ -5,19 +5,20 @@ use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use sqlx::SqlitePool;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
+use crate::app_state::AppState;
 use crate::authz::{
     can_delete_file, can_download_file, can_read_file_meta, file_list_scope, file_search_scope,
     require_file_upload, AuthContext,
 };
-use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models::{File, FileQuery};
+use crate::utils::file_validator;
+use crate::utils::pagination::{PaginatedResponse, PaginationParams};
 
 const FTS_TERM_MAX_BYTES: usize = 200;
 const FILE_ID_MAX_LEN: usize = 64;
@@ -34,7 +35,6 @@ fn parse_file_id(raw: &str) -> AppResult<String> {
     Ok(u.to_string())
 }
 
-/// Reduce FTS5 syntax surprises / abuse; keep query as a single literal token phrase where possible.
 fn sanitize_fts_query(raw: &str) -> AppResult<String> {
     let t = raw.trim();
     if t.is_empty() {
@@ -49,8 +49,7 @@ fn sanitize_fts_query(raw: &str) -> AppResult<String> {
     if t.chars().any(|c| c == '\0') {
         return Err(AppError::ValidationError("Invalid search term".to_string()));
     }
-    let escaped = t.replace('"', "\"\"");
-    Ok(escaped)
+    Ok(t.replace('"', "\"\""))
 }
 
 fn content_disposition_attachment(original_name: &str) -> HeaderValue {
@@ -70,44 +69,93 @@ fn content_disposition_attachment(original_name: &str) -> HeaderValue {
 
 pub async fn list_files(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
-) -> AppResult<Json<Vec<File>>> {
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
+) -> AppResult<Json<PaginatedResponse<File>>> {
+    let pool = state.pool();
+    pagination.validate()?;
+
     let unrestricted = file_list_scope(&ctx)?;
+    let uid = ctx.user_id.to_string();
+
+    let total: i64 = if unrestricted {
+        sqlx::query_scalar("SELECT COUNT(*) FROM files")
+            .fetch_one(pool)
+            .await?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE uploaded_by = ?1")
+            .bind(&uid)
+            .fetch_one(pool)
+            .await?
+    };
+
+    let page = pagination.page;
+    let limit = pagination.limit;
+    let offset = pagination.offset();
+
     let files = if unrestricted {
         sqlx::query_as::<_, File>(
-            "SELECT * FROM files ORDER BY created_at DESC LIMIT 50",
+            "SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?",
         )
-        .fetch_all(&pool)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as::<_, File>(
-            "SELECT * FROM files WHERE uploaded_by = ?1 ORDER BY created_at DESC LIMIT 50",
+            "SELECT * FROM files WHERE uploaded_by = ?1 ORDER BY created_at DESC LIMIT ? OFFSET ?",
         )
-        .bind(ctx.user_id.to_string())
-        .fetch_all(&pool)
+        .bind(&uid)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
         .await?
     };
 
-    Ok(Json(files))
+    Ok(Json(PaginatedResponse::new(files, page, limit, total)))
 }
 
 pub async fn search_files(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
     Query(query): Query<FileQuery>,
-) -> AppResult<Json<Vec<File>>> {
+) -> AppResult<Json<PaginatedResponse<File>>> {
+    let pool = state.pool();
+    pagination.validate()?;
+
     let search_raw = query
         .search
         .ok_or_else(|| AppError::ValidationError("Search term required".to_string()))?;
     let search_term = sanitize_fts_query(&search_raw)?;
 
-    let page = query.page.unwrap_or(1).max(1);
-    let limit = query.limit.unwrap_or(20).clamp(1, 100);
-    let offset = (page - 1).saturating_mul(limit);
-
     let unrestricted = file_search_scope(&ctx)?;
     let user_id = ctx.user_id.to_string();
     let scope_all: i64 = if unrestricted { 1 } else { 0 };
+
+    let page = pagination.page;
+    let limit = pagination.limit;
+    let offset = pagination.offset();
+
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) FROM files f
+        INNER JOIN files_fts fts ON f.id = fts.id
+        WHERE files_fts MATCH ?1
+          AND (?2 = 1 OR f.uploaded_by = ?3)
+        "#,
+    )
+    .bind(&search_term)
+    .bind(scope_all)
+    .bind(&user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!(error = %e, "FTS count failed");
+        AppError::BadRequest(
+            "Search could not be executed; simplify the search term".to_string(),
+        )
+    })?;
 
     let files = sqlx::query_as::<_, File>(
         r#"
@@ -124,37 +172,42 @@ pub async fn search_files(
     .bind(&user_id)
     .bind(limit)
     .bind(offset)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|e| {
-        tracing::warn!(error = %e, "FTS search failed (syntax or DB)");
+        tracing::warn!(error = %e, "FTS search failed");
         AppError::BadRequest(
             "Search could not be executed; simplify the search term".to_string(),
         )
     })?;
 
-    Ok(Json(files))
+    Ok(Json(PaginatedResponse::new(files, page, limit, total)))
 }
 
 pub async fn upload_file(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, config)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> AppResult<Json<File>> {
     require_file_upload(&ctx)?;
 
+    let pool = state.pool();
+    let config = state.config();
+    let max = config.max_file_size;
+
+    tracing::info!(user_id = %ctx.user_id, "File upload initiated");
+
     let upload_dir = "uploads";
     fs::create_dir_all(upload_dir).await.map_err(|e| {
+        tracing::error!("Failed to create upload directory: {}", e);
         AppError::InternalServerError(format!("Failed to create upload directory: {}", e))
     })?;
 
     let mut file_name: Option<String> = None;
     let mut file_field_consumed = false;
-    let mut temp_path: Option<String> = None;
-    let mut stored_name: Option<String> = None;
-    let file_id = Uuid::new_v4().to_string();
+    let mut buf: Vec<u8> = Vec::new();
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
+    while let Some(mut field) = multipart.next_field().await.map_err(|e| {
         AppError::BadRequest(format!("Failed to read multipart field: {}", e))
     })? {
         let field_name = field.name().unwrap_or("").trim();
@@ -174,73 +227,69 @@ pub async fn upload_file(
         }
         file_field_consumed = true;
 
-        let original = field
+        file_name = field
             .file_name()
             .map(|s| s.to_string())
-            .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| AppError::BadRequest("No file name provided".to_string()))?;
-
-        file_name = Some(original.clone());
-
-        let extension = std::path::Path::new(&original)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-
-        let stored = if !extension.is_empty() {
-            format!("{}_{}.{}", file_id, Uuid::new_v4().simple(), extension)
-        } else {
-            format!("{}_{}", file_id, Uuid::new_v4().simple())
-        };
-
-        let path = format!("{}/{}", upload_dir, stored);
-        let mut dst = fs::File::create(&path).await.map_err(|e| {
-            AppError::InternalServerError(format!("Failed to create file: {}", e))
-        })?;
-
-        let max = config.max_file_size as u64;
-        let mut written: u64 = 0;
+            .filter(|s| !s.trim().is_empty());
 
         loop {
             let chunk = field.chunk().await.map_err(|e| {
-                let _ = std::fs::remove_file(&path);
                 AppError::BadRequest(format!("Failed to read upload chunk: {}", e))
             })?;
             let Some(bytes) = chunk else { break };
-            let n = bytes.len() as u64;
-            written = written.saturating_add(n);
-            if written > max {
-                let _ = fs::remove_file(&path).await;
+            if buf.len().saturating_add(bytes.len()) > max {
                 return Err(AppError::BadRequest(format!(
                     "File exceeds maximum size of {} bytes",
                     max
                 )));
             }
-            dst.write_all(&bytes).await.map_err(|e| {
-                AppError::InternalServerError(format!("Failed to write file: {}", e))
-            })?;
+            buf.extend_from_slice(&bytes);
         }
-
-        temp_path = Some(path);
-        stored_name = Some(stored);
     }
 
     if !file_field_consumed {
         return Err(AppError::BadRequest("No file provided".to_string()));
     }
 
-    let original_name = file_name.expect("validated");
-    let stored_name = stored_name.expect("set with path");
-    let file_path = temp_path.expect("set");
-
-    let file_size = fs::metadata(&file_path)
-        .await
-        .map(|m| m.len() as i64)
-        .unwrap_or(0);
+    let original_name =
+        file_name.ok_or_else(|| AppError::BadRequest("No file name provided".to_string()))?;
 
     let file_type = mime_guess::from_path(&original_name)
         .first_or_octet_stream()
         .to_string();
+
+    let safe_filename = file_validator::validate_upload(
+        &original_name,
+        &buf,
+        &file_type,
+        max,
+    )?;
+
+    let file_id = Uuid::new_v4().to_string();
+    let extension = std::path::Path::new(&safe_filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let stored_name = if !extension.is_empty() {
+        format!("{}_{}.{}", file_id, Uuid::new_v4().simple(), extension)
+    } else {
+        format!("{}_{}", file_id, Uuid::new_v4().simple())
+    };
+
+    let file_path = format!("{}/{}", upload_dir, stored_name);
+
+    let mut dst = fs::File::create(&file_path).await.map_err(|e| {
+        tracing::error!("Failed to create file on disk: {}", e);
+        AppError::InternalServerError(format!("Failed to create file: {}", e))
+    })?;
+
+    dst.write_all(&buf).await.map_err(|e| {
+        tracing::error!("Failed to write file data: {}", e);
+        AppError::InternalServerError(format!("Failed to write file: {}", e))
+    })?;
+
+    let file_size = buf.len() as i64;
 
     let file_record = sqlx::query_as::<_, File>(
         r#"INSERT INTO files (id, name, original_name, file_path, file_type, file_size, uploaded_by, created_at)
@@ -249,16 +298,24 @@ pub async fn upload_file(
     )
     .bind(&file_id)
     .bind(&stored_name)
-    .bind(&original_name)
+    .bind(&safe_filename)
     .bind(&file_path)
     .bind(&file_type)
     .bind(file_size)
     .bind(ctx.user_id.to_string())
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await;
 
     match file_record {
-        Ok(rec) => Ok(Json(rec)),
+        Ok(rec) => {
+            tracing::info!(
+                file_id = %rec.id,
+                original_name = %safe_filename,
+                size_bytes = file_size,
+                "File uploaded successfully"
+            );
+            Ok(Json(rec))
+        }
         Err(e) => {
             let _ = fs::remove_file(&file_path).await;
             Err(e.into())
@@ -268,13 +325,14 @@ pub async fn upload_file(
 
 pub async fn get_file(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<File>> {
+    let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
         .bind(&id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?;
 
     let Some(file) = file else {
@@ -290,13 +348,14 @@ pub async fn get_file(
 
 pub async fn download_file(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Response> {
+    let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
         .bind(&id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?;
 
     let Some(file) = file else {
@@ -333,13 +392,14 @@ pub async fn download_file(
 
 pub async fn delete_file(
     Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
+    let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
         .bind(&id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?;
 
     let Some(file) = file else {
@@ -352,7 +412,7 @@ pub async fn delete_file(
 
     sqlx::query("DELETE FROM files WHERE id = ?1")
         .bind(&id)
-        .execute(&pool)
+        .execute(pool)
         .await?;
 
     let _ = fs::remove_file(&file.file_path).await;

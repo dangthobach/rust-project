@@ -1,72 +1,103 @@
-use axum::{extract::{Query, State}, Extension, Json};
-use sqlx::SqlitePool;
+use axum::{
+    extract::{Path, Query, State},
+    Extension, Json,
+};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::authz::AuthContext;
-use crate::config::Config;
+use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateTaskRequest, Task, TaskQuery, UpdateTaskRequest};
+use crate::utils::pagination::{PaginatedResponse, PaginationParams};
 
 pub async fn list_tasks(
-    Extension(_ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    Extension(_user_id): Extension<Uuid>,
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
     Query(query): Query<TaskQuery>,
-) -> AppResult<Json<Vec<Task>>> {
-    let page = query.page.unwrap_or(1);
-    let limit = query.limit.unwrap_or(20);
-    let offset = (page - 1) * limit;
+) -> AppResult<Json<PaginatedResponse<Task>>> {
+    let pool = state.pool();
 
-    let mut sql = String::from("SELECT * FROM tasks WHERE 1=1");
+    pagination.validate()?;
+
+    let page = pagination.page;
+    let limit = pagination.limit;
+    let offset = pagination.offset();
+
+    let mut where_sql = String::from("WHERE 1=1");
     let mut bind_values: Vec<String> = Vec::new();
 
     if let Some(status) = query.status {
         bind_values.push(status);
-        sql.push_str(&format!(" AND status = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND status = ?{}", bind_values.len()));
     }
 
     if let Some(priority) = query.priority {
         bind_values.push(priority);
-        sql.push_str(&format!(" AND priority = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND priority = ?{}", bind_values.len()));
     }
 
     if let Some(assigned_to) = query.assigned_to {
         bind_values.push(assigned_to.to_string());
-        sql.push_str(&format!(" AND assigned_to = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND assigned_to = ?{}", bind_values.len()));
     }
 
     if let Some(client_id) = query.client_id {
         bind_values.push(client_id.to_string());
-        sql.push_str(&format!(" AND client_id = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND client_id = ?{}", bind_values.len()));
     }
 
-    sql.push_str(" ORDER BY created_at DESC LIMIT ?");
-    sql.push_str(&(bind_values.len() + 1).to_string());
-    sql.push_str(" OFFSET ?");
-    sql.push_str(&(bind_values.len() + 2).to_string());
+    let count_sql = format!("SELECT COUNT(*) FROM tasks {}", where_sql);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for value in &bind_values {
+        count_query = count_query.bind(value);
+    }
+    let total = count_query.fetch_one(pool).await?;
 
-    let mut query = sqlx::query_as::<_, Task>(&sql);
+    let data_sql = format!(
+        "SELECT * FROM tasks {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        where_sql
+    );
+    let mut data_query = sqlx::query_as::<_, Task>(&data_sql);
     for value in bind_values {
-        query = query.bind(value);
+        data_query = data_query.bind(value);
     }
-    query = query.bind(limit).bind(offset);
+    data_query = data_query.bind(limit).bind(offset);
 
-    let tasks = query.fetch_all(&pool).await?;
+    let tasks = data_query.fetch_all(pool).await?;
 
-    Ok(Json(tasks))
+    Ok(Json(PaginatedResponse::new(tasks, page, limit, total)))
 }
 
 pub async fn search_tasks(
-    Extension(_ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    Extension(_user_id): Extension<Uuid>,
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
     Query(query): Query<TaskQuery>,
-) -> AppResult<Json<Vec<Task>>> {
-    let search_term = query.search.ok_or_else(|| AppError::ValidationError("Search term required".to_string()))?;
-    let page = query.page.unwrap_or(1);
-    let limit = query.limit.unwrap_or(20);
-    let offset = (page - 1) * limit;
+) -> AppResult<Json<PaginatedResponse<Task>>> {
+    let pool = state.pool();
 
-    // Use FTS5 full-text search with MATCH operator
+    pagination.validate()?;
+
+    let search_term =
+        query
+            .search
+            .ok_or_else(|| AppError::ValidationError("Search term required".to_string()))?;
+    let page = pagination.page;
+    let limit = pagination.limit;
+    let offset = pagination.offset();
+
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) FROM tasks t
+        INNER JOIN tasks_fts fts ON t.id = fts.id
+        WHERE tasks_fts MATCH ?1
+        "#,
+    )
+    .bind(&search_term)
+    .fetch_one(pool)
+    .await?;
+
     let tasks = sqlx::query_as::<_, Task>(
         r#"
         SELECT t.* FROM tasks t
@@ -79,18 +110,22 @@ pub async fn search_tasks(
     .bind(&search_term)
     .bind(limit)
     .bind(offset)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
-    Ok(Json(tasks))
+    Ok(Json(PaginatedResponse::new(tasks, page, limit, total)))
 }
 
 pub async fn create_task(
-    Extension(ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
+    Extension(user_id): Extension<Uuid>,
+    State(state): State<AppState>,
     Json(payload): Json<CreateTaskRequest>,
 ) -> AppResult<Json<Task>> {
-    payload.validate().map_err(|e| AppError::ValidationError(e.to_string()))?;
+    let pool = state.pool();
+
+    payload
+        .validate()
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let task_id = uuid::Uuid::new_v4();
     sqlx::query(
@@ -107,26 +142,28 @@ pub async fn create_task(
     .bind(payload.assigned_to.map(|id| id.to_string()))
     .bind(payload.client_id.map(|id| id.to_string()))
     .bind(payload.due_date.map(|d| d.to_rfc3339()))
-    .bind(ctx.user_id.to_string())
-    .execute(&pool)
+    .bind(user_id.to_string())
+    .execute(pool)
     .await?;
 
     let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = ?1")
         .bind(task_id.to_string())
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await?;
 
     Ok(Json(task))
 }
 
 pub async fn get_task(
-    Extension(_ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
-    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Extension(_user_id): Extension<Uuid>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
 ) -> AppResult<Json<Task>> {
+    let pool = state.pool();
+
     let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = ?1")
         .bind(id.to_string())
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Task not found".to_string()))?;
 
@@ -134,11 +171,13 @@ pub async fn get_task(
 }
 
 pub async fn update_task(
-    Extension(_ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
-    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Extension(_user_id): Extension<Uuid>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
     Json(payload): Json<UpdateTaskRequest>,
 ) -> AppResult<Json<Task>> {
+    let pool = state.pool();
+
     let status_str = payload.status.as_ref().map(|s| s.as_str());
     sqlx::query(
         r#"
@@ -162,12 +201,12 @@ pub async fn update_task(
     .bind(payload.client_id.map(|id| id.to_string()).as_ref())
     .bind(payload.due_date.map(|d| d.to_rfc3339()).as_ref())
     .bind(id.to_string())
-    .execute(&pool)
+    .execute(pool)
     .await?;
 
     let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = ?1")
         .bind(id.to_string())
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Task not found".to_string()))?;
 
@@ -175,18 +214,22 @@ pub async fn update_task(
 }
 
 pub async fn delete_task(
-    Extension(_ctx): Extension<AuthContext>,
-    State((pool, _)): State<(SqlitePool, Config)>,
-    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Extension(_user_id): Extension<Uuid>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
+    let pool = state.pool();
+
     let result = sqlx::query("DELETE FROM tasks WHERE id = ?1")
         .bind(id.to_string())
-        .execute(&pool)
+        .execute(pool)
         .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Task not found".to_string()));
     }
 
-    Ok(Json(serde_json::json!({"message": "Task deleted successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "Task deleted successfully"}),
+    ))
 }

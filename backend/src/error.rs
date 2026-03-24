@@ -47,4 +47,16 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+impl From<bcrypt::BcryptError> for AppError {
+    fn from(err: bcrypt::BcryptError) -> Self {
+        AppError::InternalServerError(format!("Password hashing error: {}", err))
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::InternalServerError(format!("JSON error: {}", err))
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;

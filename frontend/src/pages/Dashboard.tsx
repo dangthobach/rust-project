@@ -1,116 +1,86 @@
-import { Component, createSignal, For, Show, createResource } from 'solid-js';
+import { Component, createSignal, For, Show, createMemo } from 'solid-js';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Spinner } from '~/components/ui';
 import { ClientCard, TaskCard, NotificationPanel, DataChart } from '~/components/crm';
-import { api } from '~/lib/api';
-
-interface DashboardStats {
-  totalClients: number;
-  activeClients: number;
-  totalTasks: number;
-  completedTasks: number;
-  pendingTasks: number;
-  notifications: number;
-  revenue: number;
-  growth: number;
-  activeUsers: number;
-  filesUploaded: number;
-}
+import { useClients, useTasks, useDashboardStats, useRecentActivities } from '~/lib/hooks';
 
 const Dashboard: Component = () => {
-  const [loading, setLoading] = createSignal(false);
   const [selectedPeriod, setSelectedPeriod] = createSignal('week');
   
   // Fetch real data from API
-  const [clients] = createResource(() => api.getClients());
-  const [tasks] = createResource(() => api.getTasks());
-  
-  // Calculate stats from real data
-  const stats = () => {
-    const clientsData = clients() || [];
-    const tasksData = tasks() || [];
+  const clients = useClients(() => ({ limit: 5 })); // Recent clients
+  const tasks = useTasks(() => ({ limit: 5 })); // Recent tasks
+  const dashboardStats = useDashboardStats();
+  const recentActivities = useRecentActivities(5);
+
+  // Calculate dashboard stats from real data
+  const stats = createMemo(() => {
+    const data = dashboardStats.data;
+    
+    if (!data) {
+      return {
+        totalClients: 0,
+        activeClients: 0,
+        totalTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        notifications: 0,
+        revenue: 0,
+        growth: 0,
+        activeUsers: 0,
+        filesUploaded: 0,
+        overdueCount: 0,
+        dueTodayCount: 0,
+      };
+    }
     
     return {
-      totalClients: clientsData.length,
-      activeClients: clientsData.filter((c: any) => c.status === 'active').length,
-      totalTasks: tasksData.length,
-      completedTasks: tasksData.filter((t: any) => t.status === 'completed').length,
-      pendingTasks: tasksData.filter((t: any) => t.status === 'pending').length,
-      notifications: 12,
-      revenue: 127500,
-      growth: 23.5,
-      activeUsers: 8,
-      filesUploaded: 234,
+      totalClients: data.clients.total,
+      activeClients: data.clients.active,
+      totalTasks: data.tasks.total,
+      completedTasks: data.tasks.completed,
+      pendingTasks: data.tasks.pending,
+      notifications: data.notifications.unread,
+      revenue: 127500, // TODO: Implement revenue from backend
+      growth: 23.5, // TODO: Implement growth calculation from backend
+      activeUsers: 8, // TODO: Implement active users from backend
+      filesUploaded: data.files.total,
+      overdueCount: data.tasks.overdue,
+      dueTodayCount: data.tasks.dueToday,
     };
-  };
+  });
 
   const quickActions = [
-    { icon: '➕', label: 'New Client', color: 'bg-primary', action: () => console.log('New Client') },
-    { icon: '📋', label: 'New Task', color: 'bg-accent-yellow', action: () => console.log('New Task') },
-    { icon: '📊', label: 'Generate Report', color: 'bg-secondary', action: () => console.log('Report') },
-    { icon: '📧', label: 'Send Email', color: 'bg-green-400', action: () => console.log('Email') },
-  ];
-
-  const clients = () => [
-    {
-      name: 'Acme Corporation',
-      email: 'contact@acme.com',
-      phone: '+1 234 567 890',
-      status: 'active' as const,
-      lastContact: '2 hours ago',
+    { 
+      icon: '➕', 
+      label: 'New Client', 
+      color: 'bg-primary', 
+      action: () => console.log('New Client') 
     },
-    {
-      name: 'TechStart Inc',
-      email: 'info@techstart.io',
-      phone: '+1 234 567 891',
-      status: 'active' as const,
-      lastContact: '1 day ago',
+    { 
+      icon: '📋', 
+      label: 'New Task', 
+      color: 'bg-accent-yellow', 
+      action: () => console.log('New Task') 
     },
-    {
-      name: 'Design Studio',
-      email: 'hello@designstudio.com',
-      phone: '+1 234 567 892',
-      status: 'inactive' as const,
-      lastContact: '1 week ago',
+    { 
+      icon: '📊', 
+      label: 'Generate Report', 
+      color: 'bg-secondary', 
+      action: () => console.log('Report') 
+    },
+    { 
+      icon: '📧', 
+      label: 'Send Email', 
+      color: 'bg-green-400', 
+      action: () => console.log('Email') 
     },
   ];
 
-  const tasks = () => [
-    {
-      title: 'Follow up with Acme Corporation',
-      description: 'Discuss new project requirements',
-      priority: 'high' as const,
-      dueDate: 'Today',
-      status: 'pending' as const,
-    },
-    {
-      title: 'Prepare quarterly report',
-      description: 'Compile sales data for Q4',
-      priority: 'medium' as const,
-      dueDate: 'Tomorrow',
-      status: 'in-progress' as const,
-    },
-    {
-      title: 'Client meeting preparation',
-      description: 'Review presentation slides',
-      priority: 'high' as const,
-      dueDate: 'Today',
-      status: 'pending' as const,
-    },
-    {
-      title: 'Update CRM database',
-      description: 'Add new client information',
-      priority: 'low' as const,
-      dueDate: 'Next week',
-      status: 'completed' as const,
-    },
-  ];
+  const isLoading = () => 
+    clients.isPending || tasks.isPending || dashboardStats.isPending;
 
-  const recentActivity = [
-    { icon: '👤', action: 'New client added', detail: 'Acme Corporation', time: '2 hours ago', color: 'bg-primary' },
-    { icon: '✅', action: 'Task completed', detail: 'Quarterly report finished', time: '4 hours ago', color: 'bg-green-400' },
-    { icon: '📧', action: 'Email sent', detail: 'To 15 clients', time: '6 hours ago', color: 'bg-secondary' },
-    { icon: '📁', action: 'File uploaded', detail: 'contract.pdf', time: '1 day ago', color: 'bg-accent-yellow' },
-  ];
+  const hasError = () => 
+    clients.isError || tasks.isError || dashboardStats.isError;
 
   return (
     <div>
@@ -333,21 +303,21 @@ const Dashboard: Component = () => {
             </Button>
           </div>
           
-          <Show when={clients.loading}>
+          <Show when={isLoading()}>
             <div class="flex justify-center p-8">
               <Spinner />
             </div>
           </Show>
           
-          <Show when={clients.error}>
+          <Show when={hasError()}>
             <div class="p-4 bg-red-100 border-4 border-red-500 text-red-700">
-              Error loading clients: {clients.error.message}
+              Error loading data. Please try again.
             </div>
           </Show>
           
-          <Show when={clients()}>
+          <Show when={clients.data}>
             <div class="grid gap-4">
-              <For each={clients()?.slice(0, 3)}>
+              <For each={clients.data?.data?.slice(0, 3)}>
                 {(client: any) => (
                   <ClientCard
                     name={client.name}
@@ -382,22 +352,37 @@ const Dashboard: Component = () => {
         </h2>
         <Card class="border-5">
           <CardContent class="p-6">
-            <div class="space-y-4">
-              <For each={recentActivity}>
-                {(activity) => (
-                  <div class="flex items-start gap-4 pb-4 border-b-3 border-black last:border-b-0 last:pb-0">
-                    <div class={`w-12 h-12 ${activity.color} border-4 border-black shadow-brutal flex items-center justify-center text-2xl flex-shrink-0`}>
-                      {activity.icon}
+            <Show when={recentActivities.isPending}>
+              <div class="flex justify-center p-8">
+                <Spinner />
+              </div>
+            </Show>
+            
+            <Show when={recentActivities.data}>
+              <div class="space-y-4">
+                <For each={recentActivities.data || []}>
+                  {(activity) => (
+                    <div class="flex items-start gap-4 pb-4 border-b-3 border-black last:border-b-0 last:pb-0">
+                      <div class={`w-12 h-12 ${activity.color} border-4 border-black shadow-brutal flex items-center justify-center text-2xl flex-shrink-0`}>
+                        {activity.icon}
+                      </div>
+                      <div class="flex-1">
+                        <div class="font-heading font-bold text-lg">{activity.action}</div>
+                        <div class="text-neutral-darkGray">{activity.detail}</div>
+                        <div class="text-xs text-neutral-darkGray mt-1">{activity.time}</div>
+                      </div>
                     </div>
-                    <div class="flex-1">
-                      <div class="font-heading font-bold text-lg">{activity.action}</div>
-                      <div class="text-neutral-darkGray">{activity.detail}</div>
-                      <div class="text-xs text-neutral-darkGray mt-1">{activity.time}</div>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+            
+            <Show when={(recentActivities.data || []).length === 0 && !recentActivities.isPending}>
+              <div class="text-center p-8 text-neutral-darkGray">
+                <div class="text-4xl mb-2">📋</div>
+                <p class="font-bold">No recent activities</p>
+              </div>
+            </Show>
           </CardContent>
         </Card>
       </div>
@@ -418,21 +403,21 @@ const Dashboard: Component = () => {
           </div>
         </div>
         
-        <Show when={tasks.loading}>
+        <Show when={isLoading()}>
           <div class="flex justify-center p-8">
             <Spinner />
           </div>
         </Show>
         
-        <Show when={tasks.error}>
+        <Show when={hasError()}>
           <div class="p-4 bg-red-100 border-4 border-red-500 text-red-700">
-            Error loading tasks: {tasks.error.message}
+            Error loading tasks. Please try again.
           </div>
         </Show>
         
-        <Show when={tasks()}>
+        <Show when={tasks.data}>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <For each={tasks()?.slice(0, 4)}>
+            <For each={tasks.data?.data?.slice(0, 4)}>
               {(task: any) => (
                 <TaskCard
                   title={task.title}

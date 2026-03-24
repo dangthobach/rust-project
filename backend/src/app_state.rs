@@ -1,0 +1,199 @@
+use sqlx::SqlitePool;
+use std::sync::Arc;
+use crate::core::cqrs::{CommandBus, QueryBus};
+use crate::core::events::{EventBus, PostgresEventStore, RedisEventBus, InMemoryEventBus};
+use crate::config::Config;
+use crate::handlers::websocket::WsConnectionManager;
+
+/// Application State - Centralized dependency injection container
+///
+/// Contains all shared resources needed across the application:
+/// - Database pool
+/// - CQRS buses (Command & Query)
+/// - Event Sourcing infrastructure (EventStore & EventBus)
+/// - WebSocket connection manager
+/// - Configuration
+#[derive(Clone)]
+pub struct AppState {
+    /// Database connection pool
+    pub pool: Arc<SqlitePool>,
+
+    /// Command Bus - for handling write operations
+    pub command_bus: Arc<CommandBus>,
+
+    /// Query Bus - for handling read operations
+    pub query_bus: Arc<QueryBus>,
+
+    /// Event Store - persistent storage for domain events
+    pub event_store: Arc<PostgresEventStore>,
+
+    /// Event Bus - publish/subscribe for domain events (Redis Streams)
+    pub event_bus: Arc<dyn EventBus + Send + Sync>,
+
+    /// WebSocket connection manager for real-time notifications
+    pub ws_manager: Arc<WsConnectionManager>,
+
+    /// Application configuration
+    pub config: Arc<Config>,
+}
+
+impl AppState {
+    /// Create new AppState with all dependencies initialized
+    ///
+    /// # Arguments
+    /// * `pool` - SQLite database connection pool
+    /// * `config` - Application configuration
+    ///
+    /// # Returns
+    /// * `AppState` instance with all buses and stores initialized
+    ///
+    /// # Errors
+    /// * Redis connection errors
+    /// * Configuration errors
+    pub async fn new(pool: SqlitePool, config: Config) -> anyhow::Result<Self> {
+        tracing::info!("Initializing AppState...");
+
+        // 1. Get Redis URL from environment or use default
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| {
+                tracing::warn!("REDIS_URL not set, using default: redis://127.0.0.1:6379");
+                "redis://127.0.0.1:6379".to_string()
+            });
+
+        tracing::info!("Attempting to connect to Redis at: {}", redis_url);
+
+        // 2. Initialize Event Bus (Redis with InMemory fallback)
+        let event_bus = match RedisEventBus::new(&redis_url, "neo_crm_events".to_string()) {
+            Ok(bus) => {
+                tracing::info!("✅ Redis Event Bus initialized successfully");
+                Arc::new(bus) as Arc<dyn EventBus + Send + Sync>
+            }
+            Err(e) => {
+                tracing::warn!("⚠️  Failed to connect to Redis: {}", e);
+                tracing::warn!("⚠️  Falling back to InMemoryEventBus (events won't be persisted)");
+                tracing::info!("💡 To enable Redis: docker run -d -p 6379:6379 redis:alpine");
+                Arc::new(InMemoryEventBus::new()) as Arc<dyn EventBus + Send + Sync>
+            }
+        };
+
+        // 3. Initialize Event Store (SQLite-based)
+        let event_store = Arc::new(PostgresEventStore::new(pool.clone()));
+        tracing::info!("✅ Event Store initialized");
+
+        // 4. Initialize CQRS buses
+        let command_bus = Arc::new(CommandBus::new());
+        let query_bus = Arc::new(QueryBus::new());
+        tracing::info!("✅ Command Bus and Query Bus initialized");
+
+        // 5. Initialize WebSocket connection manager
+        let ws_manager = Arc::new(WsConnectionManager::new());
+        tracing::info!("✅ WebSocket Connection Manager initialized");
+
+        // 6. Build AppState
+        let state = Self {
+            pool: Arc::new(pool),
+            command_bus,
+            query_bus,
+            event_store,
+            event_bus,
+            ws_manager,
+            config: Arc::new(config),
+        };
+
+        tracing::info!("✅ AppState initialized successfully");
+        Ok(state)
+    }
+
+    /// Get database pool reference
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    /// Get command bus reference
+    pub fn command_bus(&self) -> &CommandBus {
+        &self.command_bus
+    }
+
+    /// Get query bus reference
+    pub fn query_bus(&self) -> &QueryBus {
+        &self.query_bus
+    }
+
+    /// Get event store reference
+    pub fn event_store(&self) -> &PostgresEventStore {
+        &self.event_store
+    }
+
+    /// Get event bus reference
+    pub fn event_bus(&self) -> &Arc<dyn EventBus + Send + Sync> {
+        &self.event_bus
+    }
+
+    /// Get configuration reference
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Get WebSocket connection manager reference
+    pub fn ws_manager(&self) -> &WsConnectionManager {
+        &self.ws_manager
+    }
+
+    /// Test connections (for health checks)
+    pub async fn health_check(&self) -> anyhow::Result<()> {
+        // Test database connection
+        sqlx::query("SELECT 1")
+            .execute(self.pool.as_ref())
+            .await
+            .map_err(|e| anyhow::anyhow!("Database health check failed: {}", e))?;
+
+        // Test Redis connection by publishing a test event
+        let test_event = serde_json::json!({
+            "type": "HealthCheck",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        });
+
+        self.event_bus
+            .publish_json(test_event.to_string())
+            .await
+            .map_err(|e| anyhow::anyhow!("Redis health check failed: {}", e))?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_app_state_creation() {
+        // This test requires Redis running
+        // Skip in CI if Redis not available
+        if std::env::var("CI").is_ok() {
+            return;
+        }
+
+        // Setup test database
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+        // Create test config
+        let config = Config {
+            database_url: "sqlite::memory:".to_string(),
+            jwt_secret: "test-secret".to_string(),
+            jwt_expiration: 86400,
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_origin: "http://localhost:5173".to_string(),
+            max_file_size: 10485760,
+            upload_dir: "./uploads".to_string(),
+            redis_url: "redis://127.0.0.1:6379".to_string(),
+        };
+
+        // Create AppState (will fallback to InMemoryEventBus if Redis not available)
+        let result = AppState::new(pool, config).await;
+
+        // Should always succeed now with InMemory fallback
+        assert!(result.is_ok());
+    }
+}
