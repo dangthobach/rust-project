@@ -59,6 +59,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/files/search", get(files::search_files))
         .route("/api/files/:id", get(files::get_file))
         .route("/api/files/:id/download", get(files::download_file))
+        .route("/api/files/:id/download-url", get(files::get_download_url))
         .route("/api/files/:id", delete(files::delete_file))
         .route_layer(middleware::from_fn(
             deprecation::legacy_files_api_deprecation,

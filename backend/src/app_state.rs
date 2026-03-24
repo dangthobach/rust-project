@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::handlers::websocket::WsConnectionManager;
 use crate::integrations::{
     KafkaPublisher, KafkaPublisherAdapter, LocalObjectStorage, NoopKafkaPublisher, NoopRabbitMqPublisher,
-    ObjectStorage, RabbitMqPublisher, RabbitMqPublisherAdapter, S3CompatibleObjectStorage,
+    ObjectStorage, RabbitMqPublisher, RabbitMqPublisherAdapter, RustfsObjectStorage,
 };
 
 /// Application State - Centralized dependency injection container
@@ -108,7 +108,13 @@ impl AppState {
                 tracing::warn!("⚠️  KAFKA_BROKERS not configured, using NoopKafkaPublisher");
                 Arc::new(NoopKafkaPublisher)
             } else {
-                Arc::new(KafkaPublisherAdapter::new(config.kafka_brokers.clone()))
+                match KafkaPublisherAdapter::new(config.kafka_brokers.clone()) {
+                    Ok(v) => Arc::new(v),
+                    Err(e) => {
+                        tracing::warn!("⚠️  Kafka init failed: {}, fallback noop", e);
+                        Arc::new(NoopKafkaPublisher)
+                    }
+                }
             };
 
         // 7. Initialize RabbitMQ publisher (adapter with noop fallback)
@@ -122,12 +128,13 @@ impl AppState {
 
         // 8. Initialize Object Storage (local or s3-compatible adapter)
         let object_storage: Arc<dyn ObjectStorage + Send + Sync> =
-            if config.object_storage_provider.eq_ignore_ascii_case("s3")
-                || config.object_storage_provider.eq_ignore_ascii_case("minio")
+            if config.object_storage_provider.eq_ignore_ascii_case("rustfs")
             {
-                Arc::new(S3CompatibleObjectStorage::new(
+                Arc::new(RustfsObjectStorage::new(
                     config.object_storage_endpoint.clone(),
                     config.object_storage_bucket.clone(),
+                    config.object_storage_access_key.clone(),
+                    config.object_storage_secret_key.clone(),
                 ))
             } else {
                 Arc::new(LocalObjectStorage::new(config.upload_dir.clone()))

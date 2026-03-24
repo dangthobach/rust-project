@@ -388,13 +388,24 @@ pub async fn download_file(
         return Err(AppError::NotFound("File not found".to_string()));
     }
 
-    if !file.file_path.starts_with("./")
+    if file.file_path.starts_with("rustfs://") {
+        let signed = state
+            .object_storage
+            .presign_get_url(&file.file_path, 900)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("presign failed: {}", e)))?;
+        if let Some(url) = signed {
+            return Ok(Json(serde_json::json!({
+                "download_url": url,
+                "expires_in": 900
+            }))
+            .into_response());
+        }
+    } else if !file.file_path.starts_with("./")
         && !file.file_path.starts_with("uploads/")
         && !file.file_path.contains(":\\")
     {
-        return Err(AppError::BadRequest(
-            "Direct download for external object storage is not enabled yet".to_string(),
-        ));
+        return Err(AppError::BadRequest("Unsupported storage backend".to_string()));
     }
 
     let disk = fs::File::open(&file.file_path).await.map_err(|e| {
@@ -419,6 +430,43 @@ pub async fn download_file(
     );
 
     Ok((StatusCode::OK, headers, body).into_response())
+}
+
+pub async fn get_download_url(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let pool = state.pool();
+    let id = parse_file_id(&id)?;
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+        .bind(&id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(file) = file else {
+        return Err(AppError::NotFound("File not found".to_string()));
+    };
+    if !can_download_file(&ctx, &file) {
+        return Err(AppError::NotFound("File not found".to_string()));
+    }
+
+    let signed = state
+        .object_storage
+        .presign_get_url(&file.file_path, 900)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("presign failed: {}", e)))?;
+
+    if let Some(url) = signed {
+        return Ok(Json(serde_json::json!({
+            "download_url": url,
+            "expires_in": 900
+        })));
+    }
+
+    Err(AppError::BadRequest(
+        "Current storage backend does not support pre-signed URL".to_string(),
+    ))
 }
 
 pub async fn delete_file(

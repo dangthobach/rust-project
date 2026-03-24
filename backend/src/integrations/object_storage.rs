@@ -1,10 +1,14 @@
 use async_trait::async_trait;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use urlencoding::encode;
 
 #[async_trait]
 pub trait ObjectStorage: Send + Sync {
     async fn put_object(&self, key: &str, bytes: &[u8], content_type: &str) -> anyhow::Result<String>;
+    async fn presign_get_url(&self, object_uri: &str, expires_seconds: u64) -> anyhow::Result<Option<String>>;
     async fn health_check(&self) -> anyhow::Result<()>;
 }
 
@@ -33,20 +37,31 @@ impl ObjectStorage for LocalObjectStorage {
         fs::create_dir_all(&self.base_dir).await?;
         Ok(())
     }
+
+    async fn presign_get_url(&self, _object_uri: &str, _expires_seconds: u64) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
 }
 
-pub struct S3CompatibleObjectStorage {
+pub struct RustfsObjectStorage {
     endpoint: String,
     bucket: String,
+    access_key: String,
+    secret_key: String,
 }
-impl S3CompatibleObjectStorage {
-    pub fn new(endpoint: String, bucket: String) -> Self {
-        Self { endpoint, bucket }
+impl RustfsObjectStorage {
+    pub fn new(endpoint: String, bucket: String, access_key: String, secret_key: String) -> Self {
+        Self {
+            endpoint,
+            bucket,
+            access_key,
+            secret_key,
+        }
     }
 }
 
 #[async_trait]
-impl ObjectStorage for S3CompatibleObjectStorage {
+impl ObjectStorage for RustfsObjectStorage {
     async fn put_object(&self, key: &str, bytes: &[u8], content_type: &str) -> anyhow::Result<String> {
         tracing::info!(
             endpoint = %self.endpoint,
@@ -54,13 +69,43 @@ impl ObjectStorage for S3CompatibleObjectStorage {
             key,
             content_type,
             size = bytes.len(),
-            "s3-compatible object put (adapter)"
+            "rustfs put object (sdk adapter)"
         );
-        Ok(format!("s3://{}/{}", self.bucket, key))
+        // Placeholder for Rustfs SDK upload call.
+        Ok(format!("rustfs://{}/{}", self.bucket, key))
+    }
+
+    async fn presign_get_url(&self, object_uri: &str, expires_seconds: u64) -> anyhow::Result<Option<String>> {
+        let prefix = format!("rustfs://{}/", self.bucket);
+        let object_key = object_uri
+            .strip_prefix(&prefix)
+            .ok_or_else(|| anyhow::anyhow!("invalid rustfs object uri"))?;
+        let exp = chrono::Utc::now().timestamp() + i64::try_from(expires_seconds).unwrap_or(900);
+        let signing = format!("GET\n{}\n{}\n{}", self.bucket, object_key, exp);
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(self.secret_key.as_bytes())
+            .map_err(|e| anyhow::anyhow!("hmac init error: {e}"))?;
+        mac.update(signing.as_bytes());
+        let sig = hex::encode(mac.finalize().into_bytes());
+
+        let url = format!(
+            "{}/{}/{}?access_key={}&expires={}&signature={}",
+            self.endpoint.trim_end_matches('/'),
+            self.bucket,
+            encode(object_key),
+            encode(&self.access_key),
+            exp,
+            sig
+        );
+        Ok(Some(url))
     }
 
     async fn health_check(&self) -> anyhow::Result<()> {
-        if self.endpoint.trim().is_empty() || self.bucket.trim().is_empty() {
+        if self.endpoint.trim().is_empty()
+            || self.bucket.trim().is_empty()
+            || self.access_key.trim().is_empty()
+            || self.secret_key.trim().is_empty()
+        {
             anyhow::bail!("object storage endpoint/bucket not configured");
         }
         Ok(())

@@ -14,6 +14,7 @@ mod models;
 mod routes;
 mod services;
 mod utils;
+mod workers;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::net::SocketAddr;
@@ -23,6 +24,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::app_state::AppState;
 use crate::config::Config;
 use crate::routes::create_router_with_state;
+use crate::workers::start_workers;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -63,6 +65,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Create AppState with all CQRS buses and Event Store
     let state = AppState::new(pool, config.clone()).await?;
+
+    // Start RabbitMQ workers for async jobs
+    if let Err(e) = start_workers(state.clone(), config.rabbitmq_url.clone()).await {
+        tracing::warn!("⚠️  Workers failed to start: {}", e);
+    } else {
+        tracing::info!("✅ Workers started (thumbnail/report)");
+    }
 
     // Perform health check
     tracing::info!("Running health checks...");
