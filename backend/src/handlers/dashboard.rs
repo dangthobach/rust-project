@@ -140,7 +140,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Status counts
     let completed: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE status = 'completed'")
+        sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE status = 'done'")
             .fetch_one(pool)
             .await
             .unwrap_or(0);
@@ -151,7 +151,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
             .await
             .unwrap_or(0);
 
-    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE status = 'pending'")
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE status = 'todo'")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
@@ -163,7 +163,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Overdue tasks (due_date < now AND status != completed)
     let overdue: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE due_date < datetime('now') AND status != 'completed'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date < datetime('now') AND status != 'done'",
     )
     .fetch_one(pool)
     .await
@@ -171,7 +171,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Due today
     let due_today: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE date(due_date) = date('now') AND status != 'completed'",
+        "SELECT COUNT(*) FROM tasks WHERE date(due_date) = date('now') AND status != 'done'",
     )
     .fetch_one(pool)
     .await
@@ -179,7 +179,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Due this week
     let due_this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE due_date BETWEEN datetime('now') AND datetime('now', '+7 days') AND status != 'completed'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date BETWEEN datetime('now') AND datetime('now', '+7 days') AND status != 'done'",
     )
     .fetch_one(pool)
     .await

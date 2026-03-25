@@ -11,4 +11,5 @@ pub mod health;
 pub mod notifications;
 pub mod tasks;
 pub mod users;
+pub mod reports;
 pub mod websocket;

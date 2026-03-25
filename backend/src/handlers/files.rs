@@ -469,6 +469,48 @@ pub async fn get_download_url(
     ))
 }
 
+pub async fn get_thumbnail_url(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let pool = state.pool();
+    let id = parse_file_id(&id)?;
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+        .bind(&id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(file) = file else {
+        return Err(AppError::NotFound("File not found".to_string()));
+    };
+
+    if !can_download_file(&ctx, &file) {
+        return Err(AppError::NotFound("File not found".to_string()));
+    }
+
+    let Some(thumbnail_uri) = file.thumbnail_path.as_deref() else {
+        return Err(AppError::NotFound("Thumbnail not found".to_string()));
+    };
+
+    let signed = state
+        .object_storage
+        .presign_get_url(thumbnail_uri, 900)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("presign failed: {}", e)))?;
+
+    if let Some(url) = signed {
+        return Ok(Json(serde_json::json!({
+            "download_url": url,
+            "expires_in": 900
+        })));
+    }
+
+    Err(AppError::BadRequest(
+        "Current storage backend does not support pre-signed thumbnail URL".to_string(),
+    ))
+}
+
 pub async fn delete_file(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,

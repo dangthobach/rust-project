@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
 import ClientDetail from './pages/ClientDetail';
 import Tasks from './pages/Tasks';
+import Reports from './pages/Reports';
 import Notifications from './pages/Notifications';
 import Files from './pages/Files';
 import Users from './pages/Users';
@@ -98,6 +99,14 @@ const App: Component = () => {
               <Users />
             </Layout>
           </AdminRoute>
+        )}
+      />
+      <Route
+        path="/reports"
+        component={() => (
+          <Layout>
+            <Reports />
+          </Layout>
         )}
       />
       <Route

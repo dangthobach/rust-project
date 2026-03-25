@@ -1,8 +1,9 @@
-import { Component, createSignal, Show, For, createMemo } from 'solid-js';
+import { Component, createSignal, createEffect, Show, For, createMemo, onCleanup } from 'solid-js';
 import { Card, CardHeader, CardTitle, CardContent, Button, Spinner } from '~/components/ui';
 import { useFiles, useUploadFile, useDeleteFile, useDownloadFile, useSearchFiles } from '~/lib/hooks/useFiles';
 import { showToast } from '~/lib/toast';
 import type { FileMetadata } from '~/lib/api';
+import { FileThumbnail } from '~/components/crm';
 
 const Files: Component = () => {
   const [page, setPage] = createSignal(1);
@@ -49,6 +50,44 @@ const Files: Component = () => {
       return searchFiles.isLoading;
     }
     return files.isLoading;
+  });
+
+  // Poll softly for image thumbnails once they are uploaded (worker updates DB asynchronously).
+  // Stop polling as soon as all visible image files have thumbnail_path or after max attempts.
+  let pollTimer: number | undefined = undefined;
+  let pollAttempts = 0;
+  const POLL_MS = 2000;
+  const MAX_POLL_ATTEMPTS = 10;
+
+  createEffect(() => {
+    const list = displayFiles();
+    const anyMissingThumb =
+      search().length === 0 &&
+      list.some((f: FileMetadata) => f.file_type?.startsWith('image/') && !f.thumbnail_path);
+
+    if (anyMissingThumb) {
+      if (!pollTimer) {
+        pollAttempts = 0;
+        pollTimer = window.setInterval(() => {
+          pollAttempts++;
+          // Query should re-run and refresh thumbnail_path values.
+          files.refetch();
+          if (pollAttempts >= MAX_POLL_ATTEMPTS) {
+            window.clearInterval(pollTimer);
+            pollTimer = undefined;
+          }
+        }, POLL_MS);
+      }
+    } else {
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    }
+  });
+
+  onCleanup(() => {
+    if (pollTimer) window.clearInterval(pollTimer);
   });
 
   // File upload handlers
@@ -333,8 +372,8 @@ const Files: Component = () => {
                           onChange={() => toggleFileSelection(file.id)}
                         />
                         
-                        {/* File Icon */}
-                        <span class="text-3xl">{getFileIcon(file.file_type)}</span>
+                        {/* Thumbnail (or processing state) */}
+                        <FileThumbnail file={file} class="flex-shrink-0" />
                         
                         {/* File Info */}
                         <div class="flex-1">

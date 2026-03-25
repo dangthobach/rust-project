@@ -2,7 +2,7 @@ import { Component, createSignal, For, Show, createMemo } from 'solid-js';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '~/components/ui';
 import { TaskCard } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
-import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useTaskStats, useMyTasks } from '~/lib/hooks';
+import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useCompleteTask, useTaskStats } from '~/lib/hooks';
 import { api } from '~/lib/api';
 import { showToast } from '~/lib/toast';
 
@@ -11,7 +11,6 @@ const Tasks: Component = () => {
   const [search, setSearch] = createSignal('');
   const [status, setStatus] = createSignal('');
   const [priority, setPriority] = createSignal('');
-  const [assignedToMe, setAssignedToMe] = createSignal(false);
   const [showCreateForm, setShowCreateForm] = createSignal(false);
   const [viewMode, setViewMode] = createSignal<'grid' | 'list'>('grid');
 
@@ -19,12 +18,12 @@ const Tasks: Component = () => {
   const [newTask, setNewTask] = createSignal({
     title: '',
     description: '',
-    status: 'pending' as const,
+    status: 'todo' as const,
     priority: 'medium' as const,
     due_date: '',
     client_id: '',
-    assigned_to: '',
-    created_by: '',
+    assigned_to: undefined as any,
+    created_by: undefined as any,
   });
 
   // API hooks
@@ -34,19 +33,13 @@ const Tasks: Component = () => {
     search: search() || undefined,
     status: status() || undefined,
     priority: priority() || undefined,
-    assigned_to: assignedToMe() ? 'me' : undefined,
-  }));
-
-  const myTasks = useMyTasks(() => ({
-    page: 1,
-    limit: 5,
-    status: 'pending',
   }));
 
   const taskStats = useTaskStats();
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const completeTask = useCompleteTask();
 
   const [isExporting, setIsExporting] = createSignal(false);
 
@@ -97,12 +90,12 @@ const Tasks: Component = () => {
         setNewTask({
           title: '',
           description: '',
-          status: 'pending',
+          status: 'todo',
           priority: 'medium',
           due_date: '',
           client_id: '',
-          assigned_to: '',
-          created_by: '',
+          assigned_to: undefined as any,
+          created_by: undefined as any,
         });
         setShowCreateForm(false);
       },
@@ -137,7 +130,6 @@ const Tasks: Component = () => {
   const resetFilters = () => {
     setStatus('');
     setPriority('');
-    setAssignedToMe(false);
     setSearch('');
     setPage(1);
   };
@@ -161,10 +153,10 @@ const Tasks: Component = () => {
             isExporting={isExporting()}
             label="Export"
           />
-          <Button 
-            variant={assignedToMe() ? 'primary' : 'secondary'}
+          <Button
+            variant="secondary"
             size="md"
-            onClick={() => setAssignedToMe(!assignedToMe())}
+            onClick={() => showToast('info', 'Auth required', 'My Tasks needs auth token (Keycloak PKCE deferred).')}
           >
             📋 My Tasks
           </Button>
@@ -228,11 +220,11 @@ const Tasks: Component = () => {
             All Status
           </Button>
           <Button
-            variant={status() === 'pending' ? 'primary' : 'secondary'}
+            variant={status() === 'todo' ? 'primary' : 'secondary'}
             size="sm"
-            onClick={() => handleFilterChange('status', 'pending')}
+            onClick={() => handleFilterChange('status', 'todo')}
           >
-            Pending
+            Todo
           </Button>
           <Button
             variant={status() === 'in_progress' ? 'primary' : 'secondary'}
@@ -242,11 +234,18 @@ const Tasks: Component = () => {
             In Progress
           </Button>
           <Button
-            variant={status() === 'completed' ? 'primary' : 'secondary'}
+            variant={status() === 'done' ? 'primary' : 'secondary'}
             size="sm"
-            onClick={() => handleFilterChange('status', 'completed')}
+            onClick={() => handleFilterChange('status', 'done')}
           >
-            Completed
+            Done
+          </Button>
+          <Button
+            variant={status() === 'cancelled' ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => handleFilterChange('status', 'cancelled')}
+          >
+            Cancelled
           </Button>
         </div>
 
@@ -279,6 +278,13 @@ const Tasks: Component = () => {
             onClick={() => handleFilterChange('priority', 'low')}
           >
             🟢 Low
+          </Button>
+          <Button
+            variant={priority() === 'urgent' ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => handleFilterChange('priority', 'urgent')}
+          >
+            🔥 Urgent
           </Button>
         </div>
 
@@ -346,12 +352,12 @@ const Tasks: Component = () => {
                 
                 {/* Quick Action Buttons */}
                 <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                  <Show when={task.status !== 'completed'}>
+                  <Show when={task.status !== 'done'}>
                     <Button
                       variant="primary"
                       size="sm"
                       class="bg-green-500 hover:bg-green-600"
-                      onClick={() => handleQuickStatusUpdate(task.id, 'completed')}
+                      onClick={() => completeTask.mutate(task.id)}
                       title="Mark as completed"
                     >
                       ✅
@@ -395,9 +401,10 @@ const Tasks: Component = () => {
                 <div class="absolute bottom-2 left-2">
                   <Badge 
                     variant={
-                      task.status === 'completed' ? 'success' :
+                      task.status === 'done' ? 'success' :
                       task.status === 'in_progress' ? 'primary' :
-                      task.status === 'pending' ? 'warning' : 'secondary'
+                      task.status === 'todo' ? 'warning' :
+                      task.status === 'cancelled' ? 'destructive' : 'secondary'
                     }
                     class="text-xs"
                   >
@@ -486,9 +493,10 @@ const Tasks: Component = () => {
                       value={newTask().status}
                       onChange={(e: any) => setNewTask(t => ({ ...t, status: e.currentTarget.value }))}
                     >
-                      <option value="pending">Pending</option>
+                      <option value="todo">Todo</option>
                       <option value="in_progress">In Progress</option>
-                      <option value="completed">Completed</option>
+                      <option value="done">Done</option>
+                      <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
 
@@ -504,6 +512,7 @@ const Tasks: Component = () => {
                       <option value="low">Low</option>
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
                     </select>
                   </div>
 

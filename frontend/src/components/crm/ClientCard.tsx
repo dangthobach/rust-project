@@ -5,7 +5,7 @@ interface ClientCardProps {
   name: string;
   email: string;
   phone: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'prospect' | 'customer';
   lastContact: string;
 }
 
@@ -29,7 +29,17 @@ export const ClientCard: Component<ClientCardProps> = (props) => {
             <h3 class="font-heading text-xl font-bold uppercase mb-1 truncate">{props.name}</h3>
             <p class="text-sm text-neutral-darkGray truncate">{props.email}</p>
           </div>
-          <Badge variant={props.status === 'active' ? 'success' : 'neutral'}>
+          <Badge
+            variant={
+              props.status === 'active'
+                ? 'success'
+                : props.status === 'inactive'
+                  ? 'neutral'
+                  : props.status === 'prospect'
+                    ? 'warning'
+                    : 'primary'
+            }
+          >
             {props.status}
           </Badge>
         </div>

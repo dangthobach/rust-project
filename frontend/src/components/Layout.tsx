@@ -110,6 +110,16 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
                 </span>
               </A>
               <A
+                href="/reports"
+                class="px-3 xl:px-4 py-2 text-sm xl:text-base font-heading font-bold uppercase border-3 border-black bg-white text-black shadow-brutal transition-all duration-150 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-lg hover:bg-accent-yellow"
+                activeClass="bg-accent-yellow shadow-brutal-lg -translate-x-0.5 -translate-y-0.5"
+              >
+                <span class="flex items-center gap-1 xl:gap-2">
+                  <span class="text-base xl:text-xl">🧾</span>
+                  <span class="hidden xl:inline">Reports</span>
+                </span>
+              </A>
+              <A
                 href="/files"
                 class="px-3 xl:px-4 py-2 text-sm xl:text-base font-heading font-bold uppercase border-3 border-black bg-white text-black shadow-brutal transition-all duration-150 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-lg hover:bg-secondary hover:text-white"
                 activeClass="bg-secondary text-white shadow-brutal-lg -translate-x-0.5 -translate-y-0.5"

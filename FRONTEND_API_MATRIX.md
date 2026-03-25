@@ -37,6 +37,7 @@ Pham vi: map endpoint, payload, trang thai UI, va bo component tai su dung.
 | Tasks | `/api/tasks/:id` | DELETE | none | `204` | confirm + pending UI |
 | Files (legacy) | `/api/files` | GET | `page, limit` | paginated files | gallery/table skeleton, empty upload state |
 | Files (legacy) | `/api/files/upload` | POST multipart | form-data field `file` | `File` | upload progress, size/type validation, queued badge |
+| Files (legacy) | `/api/files/:id/thumbnail-url` | GET | none | `{ download_url, expires_in }` | thumbnail preview, processing fallback |
 | Files (legacy) | `/api/files/:id/download-url` | GET | none | `{ download_url, expires_in }` | "generating link", expiry countdown |
 | Files (legacy) | `/api/files/:id/download` | GET | none | stream or `{download_url}` | open file or redirect, fallback message |
 | Files (legacy) | `/api/files/:id` | DELETE | none | `{ message }` | delete pending + remove from list |

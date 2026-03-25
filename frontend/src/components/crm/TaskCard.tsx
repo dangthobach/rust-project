@@ -4,9 +4,9 @@ import { Card, CardContent, Badge } from '~/components/ui';
 interface TaskCardProps {
   title: string;
   description: string;
-  priority: 'high' | 'medium' | 'low';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
   dueDate: string;
-  status: 'pending' | 'in-progress' | 'completed';
+  status: 'todo' | 'in_progress' | 'done' | 'cancelled';
 }
 
 export const TaskCard: Component<TaskCardProps> = (props) => {
@@ -14,12 +14,14 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
     high: 'bg-accent text-white',
     medium: 'bg-secondary text-black',
     low: 'bg-neutral-concrete text-black',
+    urgent: 'bg-red-500 text-white',
   };
 
   const statusColors = {
-    pending: 'bg-neutral-beige text-black',
-    'in-progress': 'bg-primary text-black',
-    completed: 'bg-green-500 text-white',
+    todo: 'bg-neutral-beige text-black',
+    in_progress: 'bg-primary text-black',
+    done: 'bg-green-500 text-white',
+    cancelled: 'bg-red-500 text-white',
   };
 
   return (

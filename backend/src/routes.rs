@@ -11,7 +11,7 @@ use tower_http::trace::TraceLayer;
 use crate::api::{cqrs_handlers as cqrs, file_system_cqrs as fs_cqrs, rbac_cqrs, tasks_cqrs, users_cqrs};
 use crate::app_state::AppState;
 use crate::config::Config;
-use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, tasks, users, websocket};
+use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, tasks, users, websocket};
 use crate::middleware::{auth as auth_middleware, deprecation, rate_limit, rbac};
 
 /// Create router with uniform AppState
@@ -60,6 +60,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/files/:id", get(files::get_file))
         .route("/api/files/:id/download", get(files::download_file))
         .route("/api/files/:id/download-url", get(files::get_download_url))
+        .route("/api/files/:id/thumbnail-url", get(files::get_thumbnail_url))
         .route("/api/files/:id", delete(files::delete_file))
         .route_layer(middleware::from_fn(
             deprecation::legacy_files_api_deprecation,
@@ -178,6 +179,12 @@ pub fn create_router_with_state(state: AppState) -> Router {
         // Export routes (authenticated users)
         .route("/api/export/clients", get(export::export_clients))
         .route("/api/export/tasks", get(export::export_tasks))
+        // Async Reports exports (queued -> ready)
+        .route("/api/reports/exports", post(reports::start_report_export))
+        .route(
+            "/api/reports/exports/:id",
+            get(reports::get_report_export_status),
+        )
         // WebSocket route for real-time notifications
         .route("/api/ws", get(websocket::websocket_handler))
         // Merge manager-only routes

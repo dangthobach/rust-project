@@ -11,6 +11,10 @@ services:
       DATABASE_URL: sqlite:///app/data/crm.db
       RUST_LOG: info
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      # Enables Redis Streams event bus (CQRS/Event streaming parts)
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Enables RabbitMQ worker consumers (thumbnail/report async jobs)
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://crm:crm-pass@rabbitmq:5672/%2f}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
       HOST: 0.0.0.0
       PORT: 3000
@@ -18,6 +22,11 @@ services:
     ports:
       - "3000:3000"  # API port
       - "9090:9090"  # Metrics port
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - backend-data:/app/data
       - backend-uploads:/app/uploads
@@ -47,6 +56,47 @@ services:
     restart: unless-stopped
     networks:
       - crm-network
+
+  # Redis (EventBus + small caching)
+  redis:
+    image: redis:7-alpine
+    container_name: neo-crm-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - crm-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # RabbitMQ (async jobs: thumbnail.generate, report.export.*)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: neo-crm-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: crm
+      RABBITMQ_DEFAULT_PASS: crm-pass
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - crm-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # Prometheus for metrics collection (optional)
   prometheus:
@@ -90,6 +140,10 @@ volumes:
   backend-data:
     driver: local
   backend-uploads:
+    driver: local
+  redis-data:
+    driver: local
+  rabbitmq-data:
     driver: local
   prometheus-data:
     driver: local

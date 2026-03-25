@@ -4,9 +4,12 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use chrono::Utc;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use crate::app_state::AppState;
+use crate::authz::permissions;
 use crate::authz::{load_effective_permissions, AuthContext};
 use crate::models::User;
 use crate::utils::jwt;
@@ -24,10 +27,36 @@ pub async fn auth(
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
 
+    // No-JWT dev mode:
+    // - If Authorization header is missing -> inject a superuser admin principal
+    // - If Authorization header is present but invalid -> still reject
     let token = match auth_header {
-        Some(h) if h.starts_with("Bearer ") => h[7..].trim(),
+        Some(h) if h.starts_with("Bearer ") => h[7..].trim().to_string(),
+        None => {
+            tracing::warn!("Authorization header missing; allow anonymous dev principal");
+            let user_id = Uuid::nil();
+            let perms: BTreeSet<String> = BTreeSet::from([permissions::SYSTEM_SUPERUSER.to_string()]);
+            let now = Utc::now();
+            let user = User {
+                id: user_id.to_string(),
+                email: "anonymous@local".to_string(),
+                password_hash: "".to_string(),
+                full_name: "Anonymous".to_string(),
+                role: "admin".to_string(),
+                avatar_url: None,
+                is_active: true,
+                created_at: now,
+                updated_at: now,
+            };
+            let ctx = AuthContext::new(user_id, perms);
+            req.extensions_mut().insert(user_id);
+            req.extensions_mut().insert(user.id.clone());
+            req.extensions_mut().insert(user);
+            req.extensions_mut().insert(ctx);
+            return Ok(next.run(req).await);
+        }
         _ => {
-            tracing::warn!("Missing or invalid Authorization header");
+            tracing::warn!("Invalid Authorization header format");
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
@@ -36,7 +65,7 @@ pub async fn auth(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let user_id_str = jwt::verify_token(token).map_err(|e| {
+    let user_id_str = jwt::verify_token(&token).map_err(|e| {
         tracing::warn!("Invalid JWT: {:?}", e);
         StatusCode::UNAUTHORIZED
     })?;

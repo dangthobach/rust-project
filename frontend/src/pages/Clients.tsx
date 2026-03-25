@@ -217,8 +217,8 @@ const Clients: Component = () => {
           </For>
         </div>
 
-        {/* Pagination */}
-        <Show when={clients.data?.pagination}>
+        {/* Pagination (approximate for CQRS list; disabled while searching) */}
+        <Show when={clients.data?.pagination && search().trim().length === 0}>
           <div class="flex items-center justify-between mt-8">
             <p class="text-sm text-neutral-darkGray">
               Showing {clients.data?.data?.length || 0} of {clients.data?.pagination?.total || 0} clients
