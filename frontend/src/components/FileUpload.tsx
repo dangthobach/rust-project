@@ -168,7 +168,7 @@ export const FileUpload: Component<FileUploadProps> = (props) => {
   };
 
   // Upload a single file
-  const uploadSingleFile = async (uploadFile: UploadFile): Promise<void> => {
+  const uploadSingleFile = async (uploadFile: UploadFile): Promise<any> => {
     setUploadFiles(prev => prev.map(f => 
       f.id === uploadFile.id 
         ? { ...f, status: 'uploading' as const, progress: 0 }

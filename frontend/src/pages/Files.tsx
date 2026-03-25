@@ -372,27 +372,27 @@ const Files: Component = () => {
               </div>
 
               {/* Pagination */}
-              <Show when={pagination() && pagination()!.total_pages > 1}>
+              <Show when={pagination() && (pagination() as any)!.total_pages > 1}>
                 {(p) => (
                   <div class="mt-6 flex items-center justify-center gap-2">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={!p().has_prev}
+                      disabled={!(p() as any).has_prev}
                     >
                       ← Previous
                     </Button>
                     
                     <span class="px-4 py-2 font-bold">
-                      Page {p().page} of {p().total_pages}
+                      Page {(p() as any).page} of {(p() as any).total_pages}
                     </span>
                     
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setPage(p => p + 1)}
-                      disabled={!p().has_next}
+                      disabled={!(p() as any).has_next}
                     >
                       Next →
                     </Button>

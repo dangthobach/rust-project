@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner
 import { TaskCard } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
 import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useTaskStats, useMyTasks } from '~/lib/hooks';
-import { api, auth } from '~/lib/api';
+import { api } from '~/lib/api';
 import { showToast } from '~/lib/toast';
 
 const Tasks: Component = () => {
@@ -24,7 +24,7 @@ const Tasks: Component = () => {
     due_date: '',
     client_id: '',
     assigned_to: '',
-    created_by: auth.getCurrentUser()?.id || '',
+    created_by: '',
   });
 
   // API hooks
@@ -34,7 +34,7 @@ const Tasks: Component = () => {
     search: search() || undefined,
     status: status() || undefined,
     priority: priority() || undefined,
-    assigned_to: assignedToMe() ? auth.getCurrentUser()?.id : undefined,
+    assigned_to: assignedToMe() ? 'me' : undefined,
   }));
 
   const myTasks = useMyTasks(() => ({
@@ -75,7 +75,7 @@ const Tasks: Component = () => {
   };
 
   // Quick stats from API
-  const stats = createMemo(() => taskStats.stats.data || {
+  const stats = createMemo(() => taskStats.data || {
     total: 0,
     completed: 0,
     pending: 0,
@@ -102,7 +102,7 @@ const Tasks: Component = () => {
           due_date: '',
           client_id: '',
           assigned_to: '',
-          created_by: auth.getCurrentUser()?.id || '',
+          created_by: '',
         });
         setShowCreateForm(false);
       },

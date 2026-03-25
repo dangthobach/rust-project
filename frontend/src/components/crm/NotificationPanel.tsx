@@ -1,19 +1,19 @@
 import { Component, createSignal, For, Show, createResource } from 'solid-js';
 import { Card, Badge, Button, Spinner } from '~/components/ui';
-import { api } from '~/lib/api';
+import { api, type Notification as ApiNotification } from '~/lib/api';
 
-interface Notification {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  isRead: boolean;
-  time: string;
-}
+type Notification = ApiNotification & { isRead: boolean; time: string };
 
 export const NotificationPanel: Component = () => {
   const [showAll, setShowAll] = createSignal(false);
-  const [notifications] = createResource<Notification[]>(() => api.getNotifications());
+  const [notifications] = createResource<Notification[]>(async () => {
+    const rows = await api.getNotifications();
+    return rows.map((n) => ({
+      ...n,
+      isRead: n.is_read ?? n.read ?? false,
+      time: new Date(n.created_at).toLocaleString(),
+    }));
+  });
 
   const displayNotifications = () => {
     const items = notifications();

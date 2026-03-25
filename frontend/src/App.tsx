@@ -23,119 +23,97 @@ const App: Component = () => {
       <Route
         path="/"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <Dashboard />
+          </Layout>
         )}
       />
       <Route
         path="/clients"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <Clients />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <Clients />
+          </Layout>
         )}
       />
       <Route
         path="/clients/:id"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <ClientDetail />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <ClientDetail />
+          </Layout>
         )}
       />
       <Route
         path="/tasks"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <Tasks />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <Tasks />
+          </Layout>
         )}
       />
       <Route
         path="/profile"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <UserProfile />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <UserProfile />
+          </Layout>
         )}
       />
       <Route
         path="/users-management"
         component={() => (
-          <ProtectedRoute>
-            <AdminRoute>
-              <Layout>
-                <UserManagement />
-              </Layout>
-            </AdminRoute>
-          </ProtectedRoute>
+          <AdminRoute>
+            <Layout>
+              <UserManagement />
+            </Layout>
+          </AdminRoute>
         )}
       />
       <Route
         path="/admin-dashboard"
         component={() => (
-          <ProtectedRoute>
-            <AdminRoute>
-              <Layout>
-                <AdminDashboard />
-              </Layout>
-            </AdminRoute>
-          </ProtectedRoute>
+          <AdminRoute>
+            <Layout>
+              <AdminDashboard />
+            </Layout>
+          </AdminRoute>
         )}
       />
       <Route
         path="/analytics"
         component={() => (
-          <ProtectedRoute>
-            <AdminRoute>
-              <Layout>
-                <Analytics />
-              </Layout>
-            </AdminRoute>
-          </ProtectedRoute>
+          <AdminRoute>
+            <Layout>
+              <Analytics />
+            </Layout>
+          </AdminRoute>
         )}
       />
       <Route
         path="/users"
         component={() => (
-          <ProtectedRoute>
-            <AdminRoute>
-              <Layout>
-                <Users />
-              </Layout>
-            </AdminRoute>
-          </ProtectedRoute>
+          <AdminRoute>
+            <Layout>
+              <Users />
+            </Layout>
+          </AdminRoute>
         )}
       />
       <Route
         path="/notifications"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <Notifications />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <Notifications />
+          </Layout>
         )}
       />
       <Route
         path="/files"
         component={() => (
-          <ProtectedRoute>
-            <Layout>
-              <Files />
-            </Layout>
-          </ProtectedRoute>
+          <Layout>
+            <Files />
+          </Layout>
         )}
       />
     </>

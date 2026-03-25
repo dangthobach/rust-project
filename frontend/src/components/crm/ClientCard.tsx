@@ -29,7 +29,7 @@ export const ClientCard: Component<ClientCardProps> = (props) => {
             <h3 class="font-heading text-xl font-bold uppercase mb-1 truncate">{props.name}</h3>
             <p class="text-sm text-neutral-darkGray truncate">{props.email}</p>
           </div>
-          <Badge variant={props.status === 'active' ? 'success' : 'default'}>
+          <Badge variant={props.status === 'active' ? 'success' : 'neutral'}>
             {props.status}
           </Badge>
         </div>

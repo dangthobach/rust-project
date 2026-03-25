@@ -1,14 +1,13 @@
 import { Component, createSignal, Show, JSX } from 'solid-js';
 import { A } from '@solidjs/router';
 import { Badge } from './ui';
-import { useAuthRole } from '../lib/hooks/useAuthRole';
 import ToastContainer from './ToastContainer';
 
 const Layout: Component<{ children?: JSX.Element }> = (props) => {
   const [mobileMenuOpen, setMobileMenuOpen] = createSignal(false);
   const [adminMenuOpen, setAdminMenuOpen] = createSignal(false);
   const [currentTime, setCurrentTime] = createSignal(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-  const { isAdmin } = useAuthRole();
+  const isAdmin = () => false; // Auth deferred (Keycloak PKCE)
 
   // Update time every minute
   setInterval(() => {

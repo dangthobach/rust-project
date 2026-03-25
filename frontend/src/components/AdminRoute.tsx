@@ -5,7 +5,7 @@
 
 import { Component, Show, createEffect } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
-import { useAuthRole } from '../lib/hooks/useAuthRole';
+import { NO_AUTH } from '~/lib/env';
 
 interface AdminRouteProps {
   children: any;
@@ -16,21 +16,16 @@ interface AdminRouteProps {
  * Automatically redirects non-admin users to home page
  */
 const AdminRoute: Component<AdminRouteProps> = (props) => {
-  const { isAdmin, isAuthenticated } = useAuthRole();
   const navigate = useNavigate();
 
   createEffect(() => {
-    if (!isAuthenticated()) {
-      // Not authenticated, redirect to login
-      navigate('/login', { replace: true });
-    } else if (!isAdmin()) {
-      // Not admin, redirect to home
-      navigate('/', { replace: true });
-    }
+    if (NO_AUTH) return;
+    // Auth deferred (Keycloak PKCE). For now, treat as non-admin.
+    navigate('/', { replace: true });
   });
 
   return (
-    <Show when={isAuthenticated() && isAdmin()} fallback={
+    <Show when={NO_AUTH} fallback={
       <div class="flex items-center justify-center min-h-screen">
         <div class="border-4 border-black bg-white p-8 shadow-brutal">
           <h2 class="font-heading text-2xl font-bold mb-4">Access Denied</h2>

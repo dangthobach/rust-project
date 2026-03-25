@@ -2,7 +2,7 @@ import { Component, JSX, splitProps } from 'solid-js';
 import { cn } from '~/theme/utils';
 
 interface CardProps extends JSX.HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'primary' | 'secondary';
+  variant?: 'default' | 'primary' | 'secondary' | 'accent';
   hoverable?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
 }
@@ -16,6 +16,7 @@ export const Card: Component<CardProps> = (props) => {
     default: 'card',
     primary: 'card-primary',
     secondary: 'card-secondary',
+    accent: 'card-secondary',
   };
 
   const paddingClasses = {
