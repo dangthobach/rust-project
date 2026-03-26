@@ -70,6 +70,7 @@ pub async fn list_files(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(pagination): Query<PaginationParams>,
+    Query(query): Query<FileQuery>,
 ) -> AppResult<Json<PaginatedResponse<File>>> {
     let pool = state.pool();
     pagination.validate()?;
@@ -77,39 +78,72 @@ pub async fn list_files(
     let unrestricted = file_list_scope(&ctx)?;
     let uid = ctx.user_id.to_string();
 
-    let total: i64 = if unrestricted {
-        sqlx::query_scalar("SELECT COUNT(*) FROM files")
-            .fetch_one(pool)
-            .await?
-    } else {
-        sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE uploaded_by = ?1")
-            .bind(&uid)
-            .fetch_one(pool)
-            .await?
-    };
+    let mut where_sql = String::from("WHERE 1=1");
+    let mut bind_values: Vec<String> = Vec::new();
+
+    // Scope filter
+    if !unrestricted {
+        bind_values.push(uid.clone());
+        where_sql.push_str(&format!(" AND uploaded_by = ?{}", bind_values.len()));
+    }
+
+    // Optional filters
+    if let Some(t) = query
+        .file_type
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        bind_values.push(t.to_string());
+        bind_values.push(format!("{}%", t));
+        let pos = bind_values.len() - 1;
+        // Support either exact match (application/pdf) or prefix (image/)
+        where_sql.push_str(&format!(
+            " AND (file_type = ?{} OR file_type LIKE ?{})",
+            pos, pos + 1
+        ));
+    }
+
+    if let Some(client_id) = query
+        .client_id
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        bind_values.push(client_id.to_string());
+        where_sql.push_str(&format!(" AND client_id = ?{}", bind_values.len()));
+    }
+
+    if let Some(task_id) = query
+        .task_id
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        bind_values.push(task_id.to_string());
+        where_sql.push_str(&format!(" AND task_id = ?{}", bind_values.len()));
+    }
+
+    let count_sql = format!("SELECT COUNT(*) FROM files {}", where_sql);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for v in &bind_values {
+        count_query = count_query.bind(v);
+    }
+    let total = count_query.fetch_one(pool).await?;
 
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
 
-    let files = if unrestricted {
-        sqlx::query_as::<_, File>(
-            "SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as::<_, File>(
-            "SELECT * FROM files WHERE uploaded_by = ?1 ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(&uid)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?
-    };
+    let data_sql = format!(
+        "SELECT * FROM files {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        where_sql
+    );
+    let mut data_query = sqlx::query_as::<_, File>(&data_sql);
+    for v in bind_values {
+        data_query = data_query.bind(v);
+    }
+    let files = data_query.bind(limit).bind(offset).fetch_all(pool).await?;
 
     Ok(Json(PaginatedResponse::new(files, page, limit, total)))
 }
@@ -131,6 +165,9 @@ pub async fn search_files(
     let unrestricted = file_search_scope(&ctx)?;
     let user_id = ctx.user_id.to_string();
     let scope_all: i64 = if unrestricted { 1 } else { 0 };
+    let file_type = query.file_type.as_ref().map(|s| s.trim().to_string());
+    let client_id = query.client_id.as_ref().map(|s| s.trim().to_string());
+    let task_id = query.task_id.as_ref().map(|s| s.trim().to_string());
 
     let page = pagination.page;
     let limit = pagination.limit;
@@ -142,11 +179,21 @@ pub async fn search_files(
         INNER JOIN files_fts fts ON f.id = fts.id
         WHERE files_fts MATCH ?1
           AND (?2 = 1 OR f.uploaded_by = ?3)
+          AND (?4 IS NULL OR f.client_id = ?4)
+          AND (?5 IS NULL OR f.task_id = ?5)
+          AND (
+            ?6 IS NULL
+            OR f.file_type = ?6
+            OR f.file_type LIKE (?6 || '%')
+          )
         "#,
     )
     .bind(&search_term)
     .bind(scope_all)
     .bind(&user_id)
+    .bind(client_id.as_deref())
+    .bind(task_id.as_deref())
+    .bind(file_type.as_deref())
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -162,13 +209,23 @@ pub async fn search_files(
         INNER JOIN files_fts fts ON f.id = fts.id
         WHERE files_fts MATCH ?1
           AND (?2 = 1 OR f.uploaded_by = ?3)
+          AND (?4 IS NULL OR f.client_id = ?4)
+          AND (?5 IS NULL OR f.task_id = ?5)
+          AND (
+            ?6 IS NULL
+            OR f.file_type = ?6
+            OR f.file_type LIKE (?6 || '%')
+          )
         ORDER BY rank, f.created_at DESC
-        LIMIT ?4 OFFSET ?5
+        LIMIT ?7 OFFSET ?8
         "#,
     )
     .bind(&search_term)
     .bind(scope_all)
     .bind(&user_id)
+    .bind(client_id.as_deref())
+    .bind(task_id.as_deref())
+    .bind(file_type.as_deref())
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)

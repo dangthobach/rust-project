@@ -2,6 +2,7 @@ import { Component, createSignal, Show, JSX } from 'solid-js';
 import { A } from '@solidjs/router';
 import { Badge } from './ui';
 import ToastContainer from './ToastContainer';
+import NotificationCenter from './NotificationCenter';
 
 const Layout: Component<{ children?: JSX.Element }> = (props) => {
   const [mobileMenuOpen, setMobileMenuOpen] = createSignal(false);
@@ -197,6 +198,7 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
 
             {/* User Menu with Stats */}
             <div class="flex items-center gap-2 md:gap-3">
+              <NotificationCenter />
               {/* Quick Stats */}
               <div class="hidden xl:flex items-center gap-2 px-3 py-2 bg-white border-3 border-black shadow-brutal">
                 <div class="flex items-center gap-1 text-xs font-bold">

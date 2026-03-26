@@ -369,6 +369,28 @@ impl QueryHandler<ListTasksQuery> for ListTasksHandler {
             qb.push("client_id = ").push_bind(client_id);
         }
 
+        if query.due_today.unwrap_or(false) {
+            if !has_where {
+                qb.push(" WHERE ");
+                has_where = true;
+            } else {
+                qb.push(" AND ");
+            }
+            // due today + not completed
+            qb.push("due_date IS NOT NULL AND date(due_date) = date('now') AND status != 'done'");
+        }
+
+        if query.overdue.unwrap_or(false) {
+            if !has_where {
+                qb.push(" WHERE ");
+                has_where = true;
+            } else {
+                qb.push(" AND ");
+            }
+            // overdue + not completed
+            qb.push("due_date IS NOT NULL AND due_date < datetime('now') AND status != 'done'");
+        }
+
         qb.push(" ORDER BY created_at DESC");
         qb.push(" LIMIT ").push_bind(query.limit.unwrap_or(50).max(1));
         qb.push(" OFFSET ").push_bind(query.offset.unwrap_or(0).max(0));

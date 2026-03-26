@@ -23,6 +23,10 @@ pub struct ListTasksQuery {
     pub assigned_to: Option<String>,
     pub client_id: Option<String>,
     pub priority: Option<String>,
+    /// If true: tasks due today (date(due_date)=date('now')) and not done
+    pub due_today: Option<bool>,
+    /// If true: tasks overdue (due_date < now) and not done
+    pub overdue: Option<bool>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }

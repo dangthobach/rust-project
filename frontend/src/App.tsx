@@ -4,7 +4,12 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
 import ClientDetail from './pages/ClientDetail';
+import ClientCreate from './pages/ClientCreate';
+import ClientEdit from './pages/ClientEdit';
 import Tasks from './pages/Tasks';
+import TaskCreate from './pages/TaskCreate';
+import TaskEdit from './pages/TaskEdit';
+import TaskDetail from './pages/TaskDetail';
 import Reports from './pages/Reports';
 import Notifications from './pages/Notifications';
 import Files from './pages/Files';
@@ -38,6 +43,14 @@ const App: Component = () => {
         )}
       />
       <Route
+        path="/clients/new"
+        component={() => (
+          <Layout>
+            <ClientCreate />
+          </Layout>
+        )}
+      />
+      <Route
         path="/clients/:id"
         component={() => (
           <Layout>
@@ -46,10 +59,42 @@ const App: Component = () => {
         )}
       />
       <Route
+        path="/clients/:id/edit"
+        component={() => (
+          <Layout>
+            <ClientEdit />
+          </Layout>
+        )}
+      />
+      <Route
         path="/tasks"
         component={() => (
           <Layout>
             <Tasks />
+          </Layout>
+        )}
+      />
+      <Route
+        path="/tasks/:id"
+        component={() => (
+          <Layout>
+            <TaskDetail />
+          </Layout>
+        )}
+      />
+      <Route
+        path="/tasks/new"
+        component={() => (
+          <Layout>
+            <TaskCreate />
+          </Layout>
+        )}
+      />
+      <Route
+        path="/tasks/:id/edit"
+        component={() => (
+          <Layout>
+            <TaskEdit />
           </Layout>
         )}
       />

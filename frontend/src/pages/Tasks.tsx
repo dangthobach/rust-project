@@ -1,42 +1,39 @@
 import { Component, createSignal, For, Show, createMemo } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '~/components/ui';
 import { TaskCard } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
-import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useCompleteTask, useTaskStats } from '~/lib/hooks';
+import { useTasks, useUpdateTask, useDeleteTask, useCompleteTask, useTaskStats, useCurrentUser } from '~/lib/hooks';
 import { api } from '~/lib/api';
 import { showToast } from '~/lib/toast';
 
 const Tasks: Component = () => {
+  const navigate = useNavigate();
   const [page, setPage] = createSignal(1);
   const [search, setSearch] = createSignal('');
   const [status, setStatus] = createSignal('');
   const [priority, setPriority] = createSignal('');
-  const [showCreateForm, setShowCreateForm] = createSignal(false);
-  const [viewMode, setViewMode] = createSignal<'grid' | 'list'>('grid');
+  const [myOnly, setMyOnly] = createSignal(false);
+  const [dueTodayOnly, setDueTodayOnly] = createSignal(false);
+  const [overdueOnly, setOverdueOnly] = createSignal(false);
+  const [viewMode, setViewMode] = createSignal<'grid' | 'list' | 'kanban'>('grid');
+  const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
 
-  // Form state for new task
-  const [newTask, setNewTask] = createSignal({
-    title: '',
-    description: '',
-    status: 'todo' as const,
-    priority: 'medium' as const,
-    due_date: '',
-    client_id: '',
-    assigned_to: undefined as any,
-    created_by: undefined as any,
-  });
+  const me = useCurrentUser();
 
   // API hooks
   const tasks = useTasks(() => ({
     page: page(),
-    limit: 12,
+    limit: viewMode() === 'kanban' ? 200 : 12,
     search: search() || undefined,
     status: status() || undefined,
     priority: priority() || undefined,
+    assigned_to: myOnly() ? me.data?.id : undefined,
+    due_today: dueTodayOnly() || undefined,
+    overdue: overdueOnly() || undefined,
   }));
 
   const taskStats = useTaskStats();
-  const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const completeTask = useCompleteTask();
@@ -78,30 +75,6 @@ const Tasks: Component = () => {
     byPriority: { high: 0, medium: 0, low: 0 }
   });
 
-  const handleCreateTask = () => {
-    const task = newTask();
-    if (!task.title) return;
-
-    createTask.mutate({
-      ...task,
-      due_date: task.due_date || undefined,
-    }, {
-      onSuccess: () => {
-        setNewTask({
-          title: '',
-          description: '',
-          status: 'todo',
-          priority: 'medium',
-          due_date: '',
-          client_id: '',
-          assigned_to: undefined as any,
-          created_by: undefined as any,
-        });
-        setShowCreateForm(false);
-      },
-    });
-  };
-
   const handleUpdateTask = (taskId: string, updates: any) => {
     updateTask.mutate({ id: taskId, updates });
   };
@@ -131,8 +104,71 @@ const Tasks: Component = () => {
     setStatus('');
     setPriority('');
     setSearch('');
+    setDueTodayOnly(false);
+    setOverdueOnly(false);
     setPage(1);
   };
+
+  const toggleSelected = (id: string, next: boolean) => {
+    setSelectedIds((prev) => {
+      const copy = new Set(prev);
+      if (next) copy.add(id);
+      else copy.delete(id);
+      return copy;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const bulkAction = async (action: 'complete' | 'cancel' | 'delete') => {
+    const ids = Array.from(selectedIds());
+    if (ids.length === 0) return;
+
+    if (action === 'delete') {
+      const ok = confirm(`Delete ${ids.length} task(s)? This cannot be undone.`);
+      if (!ok) return;
+    }
+
+    try {
+      for (const id of ids) {
+        if (action === 'complete') await api.completeTask(id);
+        if (action === 'cancel') await api.updateTask(id, { status: 'cancelled' });
+        if (action === 'delete') await api.deleteTask(id);
+      }
+      showToast('success', 'Bulk action complete', `Updated ${ids.length} task(s)`);
+      clearSelection();
+      await tasks.refetch();
+      await taskStats.refetch();
+    } catch (e: any) {
+      showToast('error', 'Bulk action failed', e?.message || 'Please try again');
+    }
+  };
+
+  const onDragStartTask = (ev: DragEvent, id: string) => {
+    try {
+      ev.dataTransfer?.setData('text/plain', id);
+      ev.dataTransfer?.setData('application/x-task-id', id);
+      ev.dataTransfer!.effectAllowed = 'move';
+    } catch {
+      // ignore
+    }
+  };
+
+  const onDropToStatus = (ev: DragEvent, newStatus: string) => {
+    ev.preventDefault();
+    const id = ev.dataTransfer?.getData('application/x-task-id') || ev.dataTransfer?.getData('text/plain');
+    if (!id) return;
+    handleQuickStatusUpdate(id, newStatus);
+  };
+
+  const tasksByStatus = createMemo(() => {
+    const rows = tasks.data?.data || [];
+    const map: Record<string, any[]> = { todo: [], in_progress: [], done: [], cancelled: [] };
+    for (const t of rows) {
+      (map[t.status] ??= []).push(t);
+    }
+    return map;
+  });
 
   return (
     <div>
@@ -156,14 +192,17 @@ const Tasks: Component = () => {
           <Button
             variant="secondary"
             size="md"
-            onClick={() => showToast('info', 'Auth required', 'My Tasks needs auth token (Keycloak PKCE deferred).')}
+            onClick={() => {
+              setMyOnly((v) => !v);
+              setPage(1);
+            }}
           >
-            📋 My Tasks
+            📋 {myOnly() ? 'All Tasks' : 'My Tasks'}
           </Button>
           <Button 
             variant="primary" 
             size="lg"
-            onClick={() => setShowCreateForm(true)}
+            onClick={() => navigate('/tasks/new')}
           >
             ➕ New Task
           </Button>
@@ -305,6 +344,13 @@ const Tasks: Component = () => {
             📋 List
           </Button>
           <Button
+            variant={viewMode() === 'kanban' ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setViewMode('kanban')}
+          >
+            Kanban
+          </Button>
+          <Button
             variant="secondary"
             size="sm"
             onClick={resetFilters}
@@ -313,6 +359,57 @@ const Tasks: Component = () => {
           </Button>
         </div>
       </div>
+
+      {/* Due filters */}
+      <div class="flex flex-wrap gap-2 mb-6">
+        <Button
+          variant={dueTodayOnly() ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => {
+            setDueTodayOnly((v) => !v);
+            if (!dueTodayOnly()) setOverdueOnly(false);
+            setPage(1);
+          }}
+        >
+          Due today
+        </Button>
+        <Button
+          variant={overdueOnly() ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => {
+            setOverdueOnly((v) => !v);
+            if (!overdueOnly()) setDueTodayOnly(false);
+            setPage(1);
+          }}
+        >
+          Overdue
+        </Button>
+      </div>
+
+      {/* Bulk actions */}
+      <Show when={selectedIds().size > 0}>
+        <Card class="p-4 mb-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="font-bold">
+              Selected: {selectedIds().size}
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="primary" size="sm" onClick={() => bulkAction('complete')}>
+                Complete
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => bulkAction('cancel')}>
+                Cancel
+              </Button>
+              <Button variant="secondary" size="sm" class="bg-red-500 hover:bg-red-600" onClick={() => bulkAction('delete')}>
+                Delete
+              </Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </Show>
 
       {/* Task List */}
       <Show when={tasks.isPending}>
@@ -338,86 +435,204 @@ const Tasks: Component = () => {
       </Show>
 
       <Show when={tasks.data}>
-        <div class={`grid gap-6 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-          <For each={tasks.data?.data || []}>
-            {(task: any) => (
-              <div class="relative group">
-                <TaskCard
-                  title={task.title}
-                  description={task.description || ''}
-                  priority={task.priority}
-                  dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
-                  status={task.status}
-                />
-                
-                {/* Quick Action Buttons */}
-                <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                  <Show when={task.status !== 'done'}>
+        <Show when={viewMode() !== 'kanban'}>
+          <div class={`grid gap-6 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+            <For each={tasks.data?.data || []}>
+              {(task: any) => (
+                <div class="relative group">
+                  <div class="absolute top-2 left-2 z-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds().has(task.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                    />
+                  </div>
+
+                  <TaskCard
+                    title={task.title}
+                    description={task.description || ''}
+                    priority={task.priority}
+                    dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                    status={task.status}
+                    onClick={() => navigate(`/tasks/${task.id}`)}
+                  />
+                  
+                  {/* Quick Action Buttons */}
+                  <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    <Show when={task.status !== 'done'}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        class="bg-green-500 hover:bg-green-600"
+                        onClick={() => completeTask.mutate(task.id)}
+                        title="Mark as completed"
+                      >
+                        ✅
+                      </Button>
+                    </Show>
+                    
+                    <Show when={task.status !== 'in_progress'}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        class="bg-blue-500 hover:bg-blue-600"
+                        onClick={() => handleQuickStatusUpdate(task.id, 'in_progress')}
+                        title="Mark as in progress"
+                      >
+                        ▶️
+                      </Button>
+                    </Show>
+
                     <Button
                       variant="primary"
                       size="sm"
-                      class="bg-green-500 hover:bg-green-600"
-                      onClick={() => completeTask.mutate(task.id)}
-                      title="Mark as completed"
+                      onClick={() => navigate(`/tasks/${task.id}/edit`)}
+                      title="Edit task"
                     >
-                      ✅
+                      ✏️
                     </Button>
-                  </Show>
-                  
-                  <Show when={task.status !== 'in_progress'}>
+                    
                     <Button
-                      variant="primary"
+                      variant="secondary"
                       size="sm"
-                      class="bg-blue-500 hover:bg-blue-600"
-                      onClick={() => handleQuickStatusUpdate(task.id, 'in_progress')}
-                      title="Mark as in progress"
+                      class="bg-red-500 hover:bg-red-600"
+                      onClick={() => handleDeleteTask(task.id)}
+                      disabled={deleteTask.isPending}
+                      title="Delete task"
                     >
-                      ▶️
+                      🗑️
                     </Button>
-                  </Show>
+                  </div>
 
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => console.log('Edit task:', task.id)}
-                    title="Edit task"
-                  >
-                    ✏️
-                  </Button>
-                  
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    class="bg-red-500 hover:bg-red-600"
-                    onClick={() => handleDeleteTask(task.id)}
-                    disabled={deleteTask.isPending}
-                    title="Delete task"
-                  >
-                    🗑️
-                  </Button>
+                  {/* Status Badge */}
+                  <div class="absolute bottom-2 left-2">
+                    <Badge 
+                      variant={
+                        task.status === 'done' ? 'success' :
+                        task.status === 'in_progress' ? 'primary' :
+                        task.status === 'todo' ? 'warning' :
+                        task.status === 'cancelled' ? 'destructive' : 'secondary'
+                      }
+                      class="text-xs"
+                    >
+                      {task.status.replace('_', ' ').toUpperCase()}
+                    </Badge>
+                  </div>
                 </div>
+              )}
+            </For>
+          </div>
+        </Show>
 
-                {/* Status Badge */}
-                <div class="absolute bottom-2 left-2">
-                  <Badge 
-                    variant={
-                      task.status === 'done' ? 'success' :
-                      task.status === 'in_progress' ? 'primary' :
-                      task.status === 'todo' ? 'warning' :
-                      task.status === 'cancelled' ? 'destructive' : 'secondary'
-                    }
-                    class="text-xs"
-                  >
-                    {task.status.replace('_', ' ').toUpperCase()}
-                  </Badge>
-                </div>
+        <Show when={viewMode() === 'kanban'}>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div
+              class="border-2 border-neutral-black bg-neutral-white"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDropToStatus(e as any, 'todo')}
+            >
+              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">Todo</div>
+              <div class="p-3 space-y-3">
+                <For each={tasksByStatus().todo}>
+                  {(task: any) => (
+                    <div class="relative">
+                      <div class="absolute top-2 left-2 z-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds().has(task.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                        />
+                      </div>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                        <TaskCard
+                          title={task.title}
+                          description={task.description || ''}
+                          priority={task.priority}
+                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          status={task.status}
+                          onClick={() => navigate(`/tasks/${task.id}`)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </For>
               </div>
-            )}
-          </For>
-        </div>
+            </div>
+
+            <div
+              class="border-2 border-neutral-black bg-neutral-white"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDropToStatus(e as any, 'in_progress')}
+            >
+              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">In Progress</div>
+              <div class="p-3 space-y-3">
+                <For each={tasksByStatus().in_progress}>
+                  {(task: any) => (
+                    <div class="relative">
+                      <div class="absolute top-2 left-2 z-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds().has(task.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                        />
+                      </div>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                        <TaskCard
+                          title={task.title}
+                          description={task.description || ''}
+                          priority={task.priority}
+                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          status={task.status}
+                          onClick={() => navigate(`/tasks/${task.id}`)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            <div
+              class="border-2 border-neutral-black bg-neutral-white"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDropToStatus(e as any, 'done')}
+            >
+              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">Done</div>
+              <div class="p-3 space-y-3">
+                <For each={tasksByStatus().done}>
+                  {(task: any) => (
+                    <div class="relative">
+                      <div class="absolute top-2 left-2 z-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds().has(task.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                        />
+                      </div>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                        <TaskCard
+                          title={task.title}
+                          description={task.description || ''}
+                          priority={task.priority}
+                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          status={task.status}
+                          onClick={() => navigate(`/tasks/${task.id}`)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+          </div>
+        </Show>
 
         {/* Pagination */}
-        <Show when={tasks.data?.pagination}>
+        <Show when={tasks.data?.pagination && viewMode() !== 'kanban'}>
           <div class="flex items-center justify-between mt-8">
             <p class="text-sm text-neutral-darkGray">
               Showing {tasks.data?.data?.length || 0} of {tasks.data?.pagination?.total || 0} tasks
@@ -448,118 +663,6 @@ const Tasks: Component = () => {
         </Show>
       </Show>
 
-      {/* Create Task Modal */}
-      <Show when={showCreateForm()}>
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Card class="w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-            <CardHeader>
-              <CardTitle>Create New Task</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div class="space-y-4">
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Title *
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="Task title"
-                    value={newTask().title}
-                    onInput={(e: any) => setNewTask(t => ({ ...t, title: e.currentTarget.value }))}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Description
-                  </label>
-                  <textarea
-                    class="w-full p-3 border-3 border-black font-mono"
-                    rows="3"
-                    placeholder="Task description..."
-                    value={newTask().description}
-                    onInput={(e: any) => setNewTask(t => ({ ...t, description: e.currentTarget.value }))}
-                  />
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label class="block font-bold uppercase text-sm mb-2">
-                      Status
-                    </label>
-                    <select
-                      class="w-full p-3 border-3 border-black font-mono"
-                      value={newTask().status}
-                      onChange={(e: any) => setNewTask(t => ({ ...t, status: e.currentTarget.value }))}
-                    >
-                      <option value="todo">Todo</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block font-bold uppercase text-sm mb-2">
-                      Priority
-                    </label>
-                    <select
-                      class="w-full p-3 border-3 border-black font-mono"
-                      value={newTask().priority}
-                      onChange={(e: any) => setNewTask(t => ({ ...t, priority: e.currentTarget.value }))}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="urgent">Urgent</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block font-bold uppercase text-sm mb-2">
-                      Due Date
-                    </label>
-                    <Input
-                      type="date"
-                      value={newTask().due_date}
-                      onInput={(e: any) => setNewTask(t => ({ ...t, due_date: e.currentTarget.value }))}
-                    />
-                  </div>
-                </div>
-
-                <Show when={createTask.isError}>
-                  <div class="p-3 bg-red-100 border-3 border-red-500 text-red-700 text-sm font-bold">
-                    {createTask.error?.message}
-                  </div>
-                </Show>
-
-                <div class="flex gap-3 pt-4">
-                  <Button
-                    variant="secondary"
-                    fullWidth
-                    onClick={() => setShowCreateForm(false)}
-                    disabled={createTask.isPending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    onClick={handleCreateTask}
-                    disabled={createTask.isPending}
-                  >
-                    <Show when={createTask.isPending} fallback="Create Task">
-                      <Spinner class="inline-block mr-2" />
-                      Creating...
-                    </Show>
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </Show>
     </div>
   );
 };

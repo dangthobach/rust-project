@@ -23,7 +23,11 @@ const Files: Component = () => {
   
   const searchFiles = useSearchFiles(
     () => search(),
-    () => ({ page: page(), limit: limit() })
+    () => ({
+      page: page(),
+      limit: limit(),
+      file_type: fileTypeFilter() || undefined,
+    })
   );
   
   const uploadFile = useUploadFile();

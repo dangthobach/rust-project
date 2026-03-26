@@ -1,10 +1,12 @@
 import { Component, createSignal, For, Show, createMemo } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Spinner } from '~/components/ui';
 import { ClientCard, TaskCard, NotificationPanel, DataChart } from '~/components/crm';
 import { useClients, useTasks, useDashboardStats, useRecentActivities } from '~/lib/hooks';
 
 const Dashboard: Component = () => {
   const [selectedPeriod, setSelectedPeriod] = createSignal('week');
+  const navigate = useNavigate();
   
   // Fetch real data from API
   const clients = useClients(() => ({ limit: 5 })); // Recent clients
@@ -40,12 +42,15 @@ const Dashboard: Component = () => {
       completedTasks: data.tasks.completed,
       pendingTasks: data.tasks.pending,
       notifications: data.notifications.unread,
-      revenue: 127500, // TODO: Implement revenue from backend
-      growth: 23.5, // TODO: Implement growth calculation from backend
-      activeUsers: 8, // TODO: Implement active users from backend
+      revenue: 0,
+      growth:
+        data.clients.total > 0
+          ? Math.round((data.clients.new_this_week / data.clients.total) * 1000) / 10
+          : 0,
+      activeUsers: 0,
       filesUploaded: data.files.total,
       overdueCount: data.tasks.overdue,
-      dueTodayCount: data.tasks.dueToday,
+      dueTodayCount: data.tasks.due_today,
     };
   });
 
@@ -54,25 +59,25 @@ const Dashboard: Component = () => {
       icon: '➕', 
       label: 'New Client', 
       color: 'bg-primary', 
-      action: () => console.log('New Client') 
+      action: () => navigate('/clients/new'),
     },
     { 
       icon: '📋', 
       label: 'New Task', 
       color: 'bg-accent-yellow', 
-      action: () => console.log('New Task') 
+      action: () => navigate('/tasks/new'),
     },
     { 
       icon: '📊', 
       label: 'Generate Report', 
       color: 'bg-secondary', 
-      action: () => console.log('Report') 
+      action: () => navigate('/reports'),
     },
     { 
       icon: '📧', 
       label: 'Send Email', 
       color: 'bg-green-400', 
-      action: () => console.log('Email') 
+      action: () => navigate('/clients'),
     },
   ];
 
@@ -320,11 +325,14 @@ const Dashboard: Component = () => {
               <For each={clients.data?.data?.slice(0, 3)}>
                 {(client: any) => (
                   <ClientCard
+                    id={client.id}
                     name={client.name}
                     email={client.email || ''}
                     phone={client.phone || ''}
                     status={client.status}
                     lastContact={new Date(client.created_at).toLocaleDateString()}
+                    onView={() => navigate(`/clients/${client.id}`)}
+                    onEdit={() => navigate(`/clients/${client.id}/edit`)}
                   />
                 )}
               </For>

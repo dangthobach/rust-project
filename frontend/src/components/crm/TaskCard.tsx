@@ -2,6 +2,7 @@ import { Component } from 'solid-js';
 import { Card, CardContent, Badge } from '~/components/ui';
 
 interface TaskCardProps {
+  onClick?: () => void;
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
@@ -25,7 +26,11 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
   };
 
   return (
-    <Card hoverable class="animate-slide-in">
+    <Card
+      hoverable
+      class={`animate-slide-in ${props.onClick ? 'cursor-pointer' : ''}`}
+      onClick={props.onClick}
+    >
       <CardContent class="p-4">
         <div class="flex items-start justify-between gap-2 mb-2">
           <h4 class="font-heading font-bold text-lg flex-1">{props.title}</h4>

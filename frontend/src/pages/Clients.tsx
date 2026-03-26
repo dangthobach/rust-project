@@ -1,26 +1,17 @@
 import { Component, createSignal, For, Show } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '~/components/ui';
 import { ClientCard } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
-import { useClients, useCreateClient, useDeleteClient } from '~/lib/hooks';
+import { useClients, useDeleteClient } from '~/lib/hooks';
 import { api } from '~/lib/api';
 import { showToast } from '~/lib/toast';
 
 const Clients: Component = () => {
+  const navigate = useNavigate();
   const [page, setPage] = createSignal(1);
   const [search, setSearch] = createSignal('');
   const [status, setStatus] = createSignal('');
-  const [showCreateForm, setShowCreateForm] = createSignal(false);
-
-  // Form state for new client
-  const [newClient, setNewClient] = createSignal({
-    name: '',
-    email: '',
-    phone: '',
-    company: '',
-    status: 'active' as const,
-    notes: '',
-  });
 
   // API hooks
   const clients = useClients(() => ({
@@ -30,7 +21,6 @@ const Clients: Component = () => {
     status: status() || undefined,
   }));
 
-  const createClient = useCreateClient();
   const deleteClient = useDeleteClient();
 
   const [isExporting, setIsExporting] = createSignal(false);
@@ -57,25 +47,6 @@ const Clients: Component = () => {
     } finally {
       setIsExporting(false);
     }
-  };
-
-  const handleCreateClient = () => {
-    const client = newClient();
-    if (!client.name || !client.email) return;
-
-    createClient.mutate(client, {
-      onSuccess: () => {
-        setNewClient({
-          name: '',
-          email: '',
-          phone: '',
-          company: '',
-          status: 'active',
-          notes: '',
-        });
-        setShowCreateForm(false);
-      },
-    });
   };
 
   const handleDeleteClient = (clientId: string) => {
@@ -116,7 +87,7 @@ const Clients: Component = () => {
           <Button 
             variant="primary" 
             size="lg"
-            onClick={() => setShowCreateForm(true)}
+            onClick={() => navigate('/clients/new')}
           >
             ➕ New Client
           </Button>
@@ -185,11 +156,14 @@ const Clients: Component = () => {
             {(client: any) => (
               <div class="relative group">
                 <ClientCard
+                  id={client.id}
                   name={client.name}
                   email={client.email || ''}
                   phone={client.phone || ''}
                   status={client.status}
                   lastContact={new Date(client.created_at).toLocaleDateString()}
+                  onView={() => navigate(`/clients/${client.id}`)}
+                  onEdit={() => navigate(`/clients/${client.id}/edit`)}
                 />
                 
                 {/* Action buttons */}
@@ -198,7 +172,7 @@ const Clients: Component = () => {
                     variant="primary"
                     size="sm"
                     class="mr-2"
-                    onClick={() => console.log('Edit client:', client.id)}
+                    onClick={() => navigate(`/clients/${client.id}/edit`)}
                   >
                     ✏️
                   </Button>
@@ -249,110 +223,6 @@ const Clients: Component = () => {
         </Show>
       </Show>
 
-      {/* Create Client Modal */}
-      <Show when={showCreateForm()}>
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Card class="w-full max-w-lg mx-4">
-            <CardHeader>
-              <CardTitle>Create New Client</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div class="space-y-4">
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Name *
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="Client name"
-                    value={newClient().name}
-                    onInput={(e: any) => setNewClient(c => ({ ...c, name: e.currentTarget.value }))}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Email *
-                  </label>
-                  <Input
-                    type="email"
-                    placeholder="client@example.com"
-                    value={newClient().email}
-                    onInput={(e: any) => setNewClient(c => ({ ...c, email: e.currentTarget.value }))}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Phone
-                  </label>
-                  <Input
-                    type="tel"
-                    placeholder="+1 234 567 890"
-                    value={newClient().phone}
-                    onInput={(e: any) => setNewClient(c => ({ ...c, phone: e.currentTarget.value }))}
-                  />
-                </div>
-
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Company
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="Company name"
-                    value={newClient().company}
-                    onInput={(e: any) => setNewClient(c => ({ ...c, company: e.currentTarget.value }))}
-                  />
-                </div>
-
-                <div>
-                  <label class="block font-bold uppercase text-sm mb-2">
-                    Notes
-                  </label>
-                  <textarea
-                    class="w-full p-3 border-3 border-black font-mono"
-                    rows="3"
-                    placeholder="Additional notes..."
-                    value={newClient().notes}
-                    onInput={(e: any) => setNewClient(c => ({ ...c, notes: e.currentTarget.value }))}
-                  />
-                </div>
-
-                <Show when={createClient.isError}>
-                  <div class="p-3 bg-red-100 border-3 border-red-500 text-red-700 text-sm font-bold">
-                    {createClient.error?.message}
-                  </div>
-                </Show>
-
-                <div class="flex gap-3 pt-4">
-                  <Button
-                    variant="secondary"
-                    fullWidth
-                    onClick={() => setShowCreateForm(false)}
-                    disabled={createClient.isPending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    onClick={handleCreateClient}
-                    disabled={createClient.isPending}
-                  >
-                    <Show when={createClient.isPending} fallback="Create Client">
-                      <Spinner class="inline-block mr-2" />
-                      Creating...
-                    </Show>
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </Show>
     </div>
   );
 };

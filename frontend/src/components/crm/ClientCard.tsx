@@ -2,11 +2,14 @@ import { Component } from 'solid-js';
 import { Card, CardContent, Badge, Button } from '~/components/ui';
 
 interface ClientCardProps {
+  id?: string;
   name: string;
   email: string;
   phone: string;
   status: 'active' | 'inactive' | 'prospect' | 'customer';
   lastContact: string;
+  onView?: () => void;
+  onEdit?: () => void;
 }
 
 export const ClientCard: Component<ClientCardProps> = (props) => {
@@ -60,10 +63,10 @@ export const ClientCard: Component<ClientCardProps> = (props) => {
         </div>
 
         <div class="flex gap-2 mt-4">
-          <Button size="sm" variant="secondary" fullWidth>
+          <Button size="sm" variant="secondary" fullWidth onClick={props.onView}>
             View
           </Button>
-          <Button size="sm" variant="ghost" fullWidth>
+          <Button size="sm" variant="ghost" fullWidth onClick={props.onEdit}>
             Edit
           </Button>
         </div>
