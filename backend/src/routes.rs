@@ -44,6 +44,16 @@ pub fn create_router_with_state(state: AppState) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(health::health_check))
+        .route(
+            "/api",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "service": "Neo CRM API",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "health": "/health",
+                }))
+            }),
+        )
         .merge(auth_routes);
 
     // Protected routes (auth required)
