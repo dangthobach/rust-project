@@ -70,6 +70,13 @@ impl RedisEventBus {
             stream_name,
         })
     }
+
+    /// `Client::open` only parses the URL; call this to ensure the server is reachable.
+    pub async fn verify_connection(&self) -> Result<(), redis::RedisError> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let _: String = redis::cmd("PING").query_async(&mut conn).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]

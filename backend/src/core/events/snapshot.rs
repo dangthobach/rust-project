@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::error::Error;
 
 use crate::core::domain::AggregateRoot;
@@ -19,15 +19,15 @@ pub trait SnapshotStore<T: AggregateRoot>: Send + Sync {
     async fn delete_snapshot(&self, id: &T::Id) -> Result<(), Self::Error>;
 }
 
-/// SQLite implementation của Snapshot Store
+/// PostgreSQL implementation của Snapshot Store
 pub struct PostgresSnapshotStore<T: AggregateRoot> {
-    pool: SqlitePool,
+    pool: PgPool,
     aggregate_type: String,
     _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T: AggregateRoot> PostgresSnapshotStore<T> {
-    pub fn new(pool: SqlitePool, aggregate_type: String) -> Self {
+    pub fn new(pool: PgPool, aggregate_type: String) -> Self {
         Self {
             pool,
             aggregate_type,
@@ -53,11 +53,11 @@ where
         sqlx::query(
             r#"
             INSERT INTO snapshots (aggregate_id, aggregate_type, aggregate_data, version)
-            VALUES (?1, ?2, ?3, ?4)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (aggregate_id) 
             DO UPDATE SET 
-                aggregate_data = ?3,
-                version = ?4,
+                aggregate_data = $3,
+                version = $4,
                 created_at = CURRENT_TIMESTAMP
         "#,
         )
@@ -76,7 +76,7 @@ where
             r#"
             SELECT aggregate_data, version
             FROM snapshots
-            WHERE aggregate_id = ?1 AND aggregate_type = ?2
+            WHERE aggregate_id = $1 AND aggregate_type = $2
         "#,
         )
         .bind(id.to_string())
@@ -96,7 +96,7 @@ where
 
     async fn delete_snapshot(&self, id: &T::Id) -> Result<(), Self::Error> {
         sqlx::query(
-            "DELETE FROM snapshots WHERE aggregate_id = ?1 AND aggregate_type = ?2",
+            "DELETE FROM snapshots WHERE aggregate_id = $1 AND aggregate_type = $2",
         )
         .bind(id.to_string())
         .bind(&self.aggregate_type)

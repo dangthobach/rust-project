@@ -1,4 +1,6 @@
 // pub mod file_system; // Disabled - requires PostgreSQL
+pub mod authorization;
+pub mod branch_cqrs;
 pub mod cqrs_handlers;
 pub mod file_system_cqrs;
 pub mod rbac_cqrs;

@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use uuid::Uuid;
 use validator::Validate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
-    pub id: String,  // SQLite stores UUID as TEXT
+    pub id: Uuid,
     pub email: String,
     #[serde(skip_serializing)]
     pub password_hash: String,
@@ -13,6 +14,7 @@ pub struct User {
     pub role: String,
     pub avatar_url: Option<String>,
     pub is_active: bool,
+    pub status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

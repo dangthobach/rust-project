@@ -77,7 +77,7 @@ pub async fn start(state: AppState, rabbitmq_url: String) -> anyhow::Result<()> 
 async fn process_job(state: AppState, payload: &[u8]) -> anyhow::Result<()> {
     let job: ThumbnailJob = serde_json::from_slice(payload)?;
     let pool = state.pool();
-    let file: File = sqlx::query_as("SELECT * FROM files WHERE id = ?1")
+    let file: File = sqlx::query_as("SELECT * FROM files WHERE id = $1")
         .bind(&job.file_id)
         .fetch_one(pool)
         .await?;
@@ -94,7 +94,10 @@ async fn process_job(state: AppState, payload: &[u8]) -> anyhow::Result<()> {
 
     let now = chrono::Utc::now();
     let tenant = state.config().default_tenant_id.clone();
-    let owner = file.uploaded_by.unwrap_or_else(|| "system".to_string());
+    let owner = file
+        .uploaded_by
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| "system".to_string());
     let key = format!(
         "{}/{}/thumbnails/{:04}/{:02}/{:02}/{}.png",
         tenant,
@@ -106,7 +109,7 @@ async fn process_job(state: AppState, payload: &[u8]) -> anyhow::Result<()> {
     );
     let thumbnail_uri = state.object_storage().put_object(&key, &buf, "image/png").await?;
 
-    sqlx::query("UPDATE files SET thumbnail_path = ?1 WHERE id = ?2")
+    sqlx::query("UPDATE files SET thumbnail_path = $1 WHERE id = $2")
         .bind(&thumbnail_uri)
         .bind(&file.id)
         .execute(pool)

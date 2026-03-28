@@ -1,6 +1,7 @@
 use axum::{extract::State, Extension, Json};
 use axum::extract::{Path, Query};
 use serde::{Deserialize, Serialize};
+use sqlx::{Postgres, QueryBuilder};
 
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
@@ -87,14 +88,14 @@ pub async fn search_users(
     let search_pattern = format!("%{}%", search_term);
 
     let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM users WHERE email LIKE ?1 OR full_name LIKE ?1"
+        "SELECT COUNT(*) FROM users WHERE email LIKE $1 OR full_name LIKE $1"
     )
     .bind(&search_pattern)
     .fetch_one(pool)
     .await?;
 
     let users = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE email LIKE ?1 OR full_name LIKE ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+        "SELECT * FROM users WHERE email LIKE $1 OR full_name LIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
     )
     .bind(&search_pattern)
     .bind(pagination.limit)
@@ -136,7 +137,7 @@ pub async fn create_user(
     }
 
     // Check if email already exists
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = ?1")
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = $1")
         .bind(&payload.email)
         .fetch_one(pool)
         .await?;
@@ -155,7 +156,7 @@ pub async fn create_user(
     sqlx::query(
         r#"
         INSERT INTO users (id, email, password_hash, full_name, role, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
         "#,
     )
     .bind(&user_id)
@@ -166,7 +167,7 @@ pub async fn create_user(
     .execute(pool)
     .await?;
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&user_id)
         .fetch_one(pool)
         .await?;
@@ -198,7 +199,7 @@ pub async fn update_user_admin(
     }
 
     // Check if user exists
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?1")
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = $1")
         .bind(&id)
         .fetch_one(pool)
         .await?;
@@ -207,42 +208,28 @@ pub async fn update_user_admin(
         return Err(AppError::NotFound("User not found".to_string()));
     }
 
-    // Update user fields
-    let mut query = String::from("UPDATE users SET updated_at = datetime('now')");
-    let mut bindings = Vec::new();
-
-    if let Some(full_name) = &payload.full_name {
-        query.push_str(", full_name = ?");
-        bindings.push(full_name.clone());
+    let mut qb = QueryBuilder::<Postgres>::new("UPDATE users SET updated_at = NOW()");
+    if let Some(ref full_name) = payload.full_name {
+        qb.push(", full_name = ");
+        qb.push_bind(full_name);
     }
-
-    if let Some(email) = &payload.email {
-        query.push_str(", email = ?");
-        bindings.push(email.clone());
+    if let Some(ref email) = payload.email {
+        qb.push(", email = ");
+        qb.push_bind(email);
     }
-
-    if let Some(role) = &payload.role {
-        query.push_str(", role = ?");
-        bindings.push(role.clone());
+    if let Some(ref role) = payload.role {
+        qb.push(", role = ");
+        qb.push_bind(role);
     }
-
-    if let Some(status) = &payload.status {
-        query.push_str(", status = ?");
-        bindings.push(status.clone());
+    if let Some(ref status) = payload.status {
+        qb.push(", status = ");
+        qb.push_bind(status);
     }
+    qb.push(" WHERE id = ");
+    qb.push_bind(&id);
+    qb.build().execute(pool).await?;
 
-    query.push_str(" WHERE id = ?");
-    bindings.push(id.clone());
-
-    // Build dynamic query
-    let mut sql_query = sqlx::query(&query);
-    for binding in bindings {
-        sql_query = sql_query.bind(binding);
-    }
-
-    sql_query.execute(pool).await?;
-
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&id)
         .fetch_one(pool)
         .await?;
@@ -259,7 +246,7 @@ pub async fn delete_user(
     let pool = state.pool();
 
     // Check if user exists
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?1")
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = $1")
         .bind(&id)
         .fetch_one(pool)
         .await?;
@@ -269,7 +256,7 @@ pub async fn delete_user(
     }
 
     // Delete user
-    sqlx::query("DELETE FROM users WHERE id = ?1")
+    sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(&id)
         .execute(pool)
         .await?;
@@ -294,26 +281,26 @@ pub async fn bulk_user_actions(
     for user_id in &payload.user_ids {
         let result = match payload.action.as_str() {
             "delete" => {
-                sqlx::query("DELETE FROM users WHERE id = ?1")
+                sqlx::query("DELETE FROM users WHERE id = $1")
                     .bind(user_id)
                     .execute(pool)
                     .await
             }
             "activate" => {
-                sqlx::query("UPDATE users SET status = 'active', updated_at = datetime('now') WHERE id = ?1")
+                sqlx::query("UPDATE users SET status = 'active', updated_at = NOW() WHERE id = $1")
                     .bind(user_id)
                     .execute(pool)
                     .await
             }
             "deactivate" => {
-                sqlx::query("UPDATE users SET status = 'inactive', updated_at = datetime('now') WHERE id = ?1")
+                sqlx::query("UPDATE users SET status = 'inactive', updated_at = NOW() WHERE id = $1")
                     .bind(user_id)
                     .execute(pool)
                     .await
             }
             "change_role" => {
                 if let Some(ref role) = payload.role {
-                    sqlx::query("UPDATE users SET role = ?1, updated_at = datetime('now') WHERE id = ?2")
+                    sqlx::query("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2")
                         .bind(role)
                         .bind(user_id)
                         .execute(pool)

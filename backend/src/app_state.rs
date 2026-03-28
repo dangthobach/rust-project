@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use crate::core::cqrs::{CommandBus, QueryBus};
 use crate::core::events::{EventBus, PostgresEventStore, RedisEventBus, InMemoryEventBus};
@@ -20,7 +20,7 @@ use crate::integrations::{
 #[derive(Clone)]
 pub struct AppState {
     /// Database connection pool
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 
     /// Command Bus - for handling write operations
     pub command_bus: Arc<CommandBus>,
@@ -54,7 +54,7 @@ impl AppState {
     /// Create new AppState with all dependencies initialized
     ///
     /// # Arguments
-    /// * `pool` - SQLite database connection pool
+    /// * `pool` - PostgreSQL connection pool
     /// * `config` - Application configuration
     ///
     /// # Returns
@@ -63,7 +63,7 @@ impl AppState {
     /// # Errors
     /// * Redis connection errors
     /// * Configuration errors
-    pub async fn new(pool: SqlitePool, config: Config) -> anyhow::Result<Self> {
+    pub async fn new(pool: PgPool, config: Config) -> anyhow::Result<Self> {
         tracing::info!("Initializing AppState...");
 
         // 1. Get Redis URL from environment or use default
@@ -75,19 +75,30 @@ impl AppState {
 
         tracing::info!("Attempting to connect to Redis at: {}", redis_url);
 
-        // 2. Initialize Event Bus (Redis with InMemory fallback)
-        let event_bus = match RedisEventBus::new(&redis_url, "neo_crm_events".to_string()) {
-            Ok(bus) => {
-                tracing::info!("✅ Redis Event Bus initialized successfully");
-                Arc::new(bus) as Arc<dyn EventBus + Send + Sync>
-            }
-            Err(e) => {
-                tracing::warn!("⚠️  Failed to connect to Redis: {}", e);
-                tracing::warn!("⚠️  Falling back to InMemoryEventBus (events won't be persisted)");
-                tracing::info!("💡 To enable Redis: docker run -d -p 6379:6379 redis:alpine");
-                Arc::new(InMemoryEventBus::new()) as Arc<dyn EventBus + Send + Sync>
-            }
-        };
+        // 2. Initialize Event Bus (Redis with InMemory fallback if server unreachable)
+        let event_bus: Arc<dyn EventBus + Send + Sync> =
+            match RedisEventBus::new(&redis_url, "neo_crm_events".to_string()) {
+                Ok(bus) => match bus.verify_connection().await {
+                    Ok(()) => {
+                        tracing::info!("✅ Redis Event Bus initialized successfully");
+                        Arc::new(bus)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "⚠️  Redis unreachable: {} — using InMemoryEventBus (events not persisted)",
+                            e
+                        );
+                        tracing::info!("💡 To enable Redis: docker run -d -p 6379:6379 redis:alpine");
+                        Arc::new(InMemoryEventBus::new())
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("⚠️  Failed to create Redis client: {}", e);
+                    tracing::warn!("⚠️  Falling back to InMemoryEventBus (events won't be persisted)");
+                    tracing::info!("💡 To enable Redis: docker run -d -p 6379:6379 redis:alpine");
+                    Arc::new(InMemoryEventBus::new())
+                }
+            };
 
         // 3. Initialize Event Store (SQLite-based)
         let event_store = Arc::new(PostgresEventStore::new(pool.clone()));
@@ -159,7 +170,7 @@ impl AppState {
     }
 
     /// Get database pool reference
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
@@ -248,6 +259,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires Redis and TEST_DATABASE_URL (PostgreSQL)"]
     async fn test_app_state_creation() {
         // This test requires Redis running
         // Skip in CI if Redis not available
@@ -255,12 +267,16 @@ mod tests {
             return;
         }
 
-        // Setup test database
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let url = match std::env::var("TEST_DATABASE_URL") {
+            Ok(u) if !u.is_empty() => u,
+            _ => return,
+        };
+
+        let pool = PgPool::connect(&url).await.unwrap();
 
         // Create test config
         let config = Config {
-            database_url: "sqlite::memory:".to_string(),
+            database_url: url,
             jwt_secret: "test-secret".to_string(),
             jwt_expiration: 86400,
             host: "127.0.0.1".to_string(),

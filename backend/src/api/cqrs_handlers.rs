@@ -4,48 +4,100 @@ use axum::{
     response::Json,
     Extension,
 };
+use serde::Deserialize;
 use std::sync::Arc;
+use validator::Validate;
 
 use crate::app_state::AppState;
+use crate::authz::data_scope::DataScope;
+use crate::authz::AuthContext;
 use crate::domains::clients::{
-    CreateClientCommand, UpdateClientCommand, DeleteClientCommand,
-    GetClientQuery, ListClientsQuery, SearchClientsQuery,
-    CreateClientHandler, UpdateClientHandler, DeleteClientHandler,
-    GetClientHandler, ListClientsHandler, SearchClientsHandler,
+    CreateClientCommand, CreateClientHandler, DeleteClientCommand, DeleteClientHandler,
+    GetClientHandler, GetClientQuery, ListClientsHandler, ListClientsParams, ListClientsQuery,
+    SearchClientsHandler, SearchClientsQuery, UpdateClientCommand, UpdateClientHandler,
 };
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::models::Client;
 
 // ============================================================================
 // CLIENT CQRS HANDLERS
 // ============================================================================
 
-/// Create Client (POST /api/clients)
-///
-/// Uses CQRS pattern:
-/// 1. Extract CreateClientCommand from request
-/// 2. Validate command (automatic via Command trait)
-/// 3. Dispatch via CommandBus to CreateClientHandler
-/// 4. Handler executes DB write + publishes ClientCreatedEvent
-/// 5. Return created client
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateClientPayload {
+    #[validate(length(min = 1, max = 255))]
+    pub name: String,
+    #[validate(email)]
+    pub email: Option<String>,
+    #[validate(length(min = 1, max = 50))]
+    pub phone: Option<String>,
+    #[validate(length(max = 500))]
+    pub address: Option<String>,
+    pub company: Option<String>,
+    pub position: Option<String>,
+    pub status: Option<String>,
+    pub assigned_to: Option<String>,
+    pub notes: Option<String>,
+    pub branch_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateClientPayload {
+    #[validate(length(min = 1, max = 255))]
+    pub name: Option<String>,
+    #[validate(email)]
+    pub email: Option<String>,
+    #[validate(length(min = 1, max = 50))]
+    pub phone: Option<String>,
+    #[validate(length(max = 500))]
+    pub address: Option<String>,
+    pub company: Option<String>,
+    pub position: Option<String>,
+    pub status: Option<String>,
+    pub assigned_to: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchClientsParams {
+    pub search_term: String,
+    pub limit: Option<i64>,
+}
+
 pub async fn create_client(
     Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
-    Json(mut payload): Json<CreateClientCommand>,
+    Json(payload): Json<CreateClientPayload>,
 ) -> AppResult<Json<Client>> {
-    tracing::debug!("Creating client via CQRS: {:?}", payload);
-    payload.actor_id = Some(actor_id);
+    payload
+        .validate()
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
-    // 1. Create handler with dependencies (pool + event_bus)
+    let command = CreateClientCommand {
+        name: payload.name,
+        email: payload.email,
+        phone: payload.phone,
+        address: payload.address,
+        company: payload.company,
+        position: payload.position,
+        status: payload.status,
+        assigned_to: payload.assigned_to,
+        notes: payload.notes,
+        actor_id: Some(actor_id.clone()),
+        branch_id: payload.branch_id,
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id.clone(),
+    };
+
     let handler = Arc::new(CreateClientHandler::new(
         state.pool.clone(),
         state.event_bus.clone(),
     ));
 
-    // 2. Dispatch command via CommandBus (validates + executes)
     let client = state
         .command_bus
-        .dispatch_with_handler(payload, handler)
+        .dispatch_with_handler(command, handler)
         .await?;
 
     let event = serde_json::json!({
@@ -59,28 +111,35 @@ pub async fn create_client(
         .publish("crm.domain.client", &client.id.to_string(), &event.to_string())
         .await;
 
-    tracing::info!("Client created successfully: {}", client.id);
-
     Ok(Json(client))
 }
 
-/// Update Client (PATCH /api/clients/:id)
-///
-/// CQRS pattern:
-/// - Merges path parameter ID into command
-/// - Validates all updates
-/// - Publishes ClientUpdatedEvent with change map
 pub async fn update_client(
     Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(mut payload): Json<UpdateClientCommand>,
+    Json(payload): Json<UpdateClientPayload>,
 ) -> AppResult<Json<Client>> {
-    tracing::debug!("Updating client {} via CQRS", id);
+    payload
+        .validate()
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
-    // Inject ID from path into command
-    payload.id = id;
-    payload.actor_id = Some(actor_id);
+    let command = UpdateClientCommand {
+        id,
+        name: payload.name,
+        email: payload.email,
+        phone: payload.phone,
+        address: payload.address,
+        company: payload.company,
+        position: payload.position,
+        status: payload.status,
+        assigned_to: payload.assigned_to,
+        notes: payload.notes,
+        actor_id: Some(actor_id.clone()),
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id,
+    };
 
     let handler = Arc::new(UpdateClientHandler::new(
         state.pool.clone(),
@@ -89,7 +148,7 @@ pub async fn update_client(
 
     let client = state
         .command_bus
-        .dispatch_with_handler(payload, handler)
+        .dispatch_with_handler(command, handler)
         .await?;
 
     let event = serde_json::json!({
@@ -103,25 +162,21 @@ pub async fn update_client(
         .publish("crm.domain.client", &client.id.to_string(), &event.to_string())
         .await;
 
-    tracing::info!("Client updated successfully: {}", client.id);
-
     Ok(Json(client))
 }
 
-/// Delete Client (DELETE /api/clients/:id)
-///
-/// CQRS pattern:
-/// - Creates DeleteClientCommand from path param
-/// - Publishes ClientDeletedEvent before deletion
-/// - Returns 204 No Content on success
 pub async fn delete_client(
     Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
-    tracing::debug!("Deleting client {} via CQRS", id);
-
-    let command = DeleteClientCommand { id: id.clone(), actor_id: Some(actor_id) };
+    let command = DeleteClientCommand {
+        id: id.clone(),
+        actor_id: Some(actor_id.clone()),
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id,
+    };
 
     let handler = Arc::new(DeleteClientHandler::new(
         state.pool.clone(),
@@ -143,24 +198,20 @@ pub async fn delete_client(
         .publish("crm.domain.client", event["client_id"].as_str().unwrap_or(""), &event.to_string())
         .await;
 
-    tracing::info!("Client deleted successfully: {}", id);
-
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Get Client by ID (GET /api/clients/:id)
-///
-/// CQRS Query pattern:
-/// - Read-only operation via QueryBus
-/// - No events published
-/// - Returns 404 if not found
 pub async fn get_client(
+    Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Client>> {
-    tracing::debug!("Getting client {} via CQRS", id);
-
-    let query = GetClientQuery { id: id.clone() };
+    let query = GetClientQuery {
+        id: id.clone(),
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id,
+    };
 
     let handler = Arc::new(GetClientHandler::new(state.pool.clone()));
 
@@ -169,81 +220,64 @@ pub async fn get_client(
         .dispatch_with_handler(query, handler)
         .await?
         .ok_or_else(|| {
-            crate::error::AppError::NotFound(format!("Client with id {} not found", id))
+            AppError::NotFound(format!("Client with id {} not found", id))
         })?;
 
     Ok(Json(client))
 }
 
-/// List Clients (GET /api/clients)
-///
-/// Query parameters:
-/// - status: Filter by status (active, inactive, prospect, customer)
-/// - limit: Max results (default: all)
-/// - offset: Skip N records
-///
-/// CQRS Query pattern - read-only
 pub async fn list_clients(
+    Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
-    Query(params): Query<ListClientsQuery>,
+    Query(params): Query<ListClientsParams>,
 ) -> AppResult<Json<Vec<Client>>> {
-    tracing::debug!("Listing clients via CQRS: {:?}", params);
+    let query = ListClientsQuery {
+        status: params.status.clone(),
+        assigned_to: params.assigned_to.clone(),
+        limit: params.limit,
+        offset: params.offset,
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id,
+    };
 
     let handler = Arc::new(ListClientsHandler::new(state.pool.clone()));
 
     let clients = state
         .query_bus
-        .dispatch_with_handler(params, handler)
+        .dispatch_with_handler(query, handler)
         .await?;
-
-    tracing::debug!("Retrieved {} clients", clients.len());
 
     Ok(Json(clients))
 }
 
-/// Search Clients (GET /api/clients/search)
-///
-/// Query parameters:
-/// - search_term: Search in name, email, company
-/// - limit: Max results (default: 50)
-///
-/// CQRS Query pattern - optimized for search
 pub async fn search_clients(
+    Extension(actor_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
-    Query(params): Query<SearchClientsQuery>,
+    Query(params): Query<SearchClientsParams>,
 ) -> AppResult<Json<Vec<Client>>> {
-    tracing::debug!("Searching clients via CQRS: {:?}", params);
+    let query = SearchClientsQuery {
+        search_term: params.search_term.clone(),
+        limit: params.limit,
+        data_scope: DataScope::from_auth_context(&ctx),
+        actor_user_id: actor_id,
+    };
 
     let handler = Arc::new(SearchClientsHandler::new(state.pool.clone()));
 
     let clients = state
         .query_bus
-        .dispatch_with_handler(params, handler)
+        .dispatch_with_handler(query, handler)
         .await?;
-
-    tracing::debug!("Search returned {} clients", clients.len());
 
     Ok(Json(clients))
 }
 
-// ============================================================================
-// HELPER STRUCTS (for query parameters that don't match domain queries)
-// ============================================================================
-
-// Note: If your query params differ from domain queries, define them here
-// and map to domain queries inside the handler functions
-
 #[cfg(test)]
 mod tests {
-    // Integration tests will be added in Week 2 Day 4-5
-    // These tests require:
-    // 1. Test database setup
-    // 2. AppState mock or test instance
-    // 3. Redis mock (or TestContainers)
-
     #[test]
     fn test_placeholder() {
-        // Placeholder to ensure module compiles
         assert!(true);
     }
 }

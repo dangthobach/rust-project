@@ -27,8 +27,9 @@ impl Config {
         dotenvy::dotenv().ok();
 
         let config = Config {
-            database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite:./data/crm.db".to_string()),
+            database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgresql://crm_app:crm_app@127.0.0.1:5432/crm".to_string()
+            }),
             jwt_secret: std::env::var("JWT_SECRET")?,
             jwt_expiration: std::env::var("JWT_EXPIRATION")
                 .unwrap_or_else(|_| "86400".to_string())

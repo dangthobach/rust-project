@@ -15,6 +15,8 @@ pub struct Client {
     pub address: Option<String>,
     pub status: String,
     pub assigned_to: Option<Uuid>,
+    /// FK to `branches.id`
+    pub branch_id: Option<Uuid>,
     pub notes: Option<String>,
     pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,

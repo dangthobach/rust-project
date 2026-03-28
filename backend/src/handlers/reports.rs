@@ -76,7 +76,7 @@ pub async fn start_report_export(
     sqlx::query(
         r#"
         INSERT INTO report_export_jobs (id, user_id, report_type, format, status)
-        VALUES (?1, ?2, ?3, ?4, 'queued')
+        VALUES ($1, $2, $3, $4, 'queued')
         "#,
     )
     .bind(&job_id)
@@ -110,7 +110,7 @@ pub async fn get_report_export_status(
 ) -> AppResult<Json<ReportExportStatusResponse>> {
     let job = sqlx::query_as::<_, ReportExportJob>(
         r#"
-        SELECT * FROM report_export_jobs WHERE id = ?1
+        SELECT * FROM report_export_jobs WHERE id = $1
         "#,
     )
     .bind(&job_id)
@@ -136,7 +136,7 @@ pub async fn get_report_export_status(
     }
 
     Ok(axum::Json(ReportExportStatusResponse {
-        job_id: job.id,
+        job_id: job.id.to_string(),
         status: job.status,
         download_url,
         expires_in,

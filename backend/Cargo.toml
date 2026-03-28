@@ -2,6 +2,7 @@
 name = "crm-backend"
 version = "0.1.0"
 edition = "2021"
+default-run = "crm-backend"
 
 [dependencies]
 # Async runtime
@@ -15,10 +16,8 @@ axum = { version = "0.7", features = ["macros", "multipart", "ws"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
 
-# Database - SQLite (H2 compatible)
-# Note: uuid feature enables TEXT-based UUID support for SQLite
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "uuid", "chrono", "migrate"] }
-# Note: SQLite stores UUIDs as TEXT (36 chars), Rust models use String type for IDs
+# Database — PostgreSQL 17 (see backend/migrations)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -65,6 +64,10 @@ image = "0.25.10"
 
 [target.'cfg(not(windows))'.dependencies]
 rdkafka = "0.39.0"
+
+[[bin]]
+name = "hash_password"
+path = "src/bin/hash_password.rs"
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json"] }

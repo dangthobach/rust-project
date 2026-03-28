@@ -4,7 +4,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ use crate::domains::file_system::handlers::HandlerState;
 /// Create file system routes
 /// Returns a stateless Router that can be merged with the main router
 pub fn create_file_system_routes(
-    pool: SqlitePool,
+    pool: PgPool,
     config: Config,
 ) -> Result<Router, anyhow::Error> {
     // Create Redis Event Bus

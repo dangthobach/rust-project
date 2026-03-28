@@ -13,6 +13,8 @@ pub struct Task {
     pub priority: String,
     pub assigned_to: Option<Uuid>,
     pub client_id: Option<Uuid>,
+    /// FK to `branches.id`; denormalized from client when linked.
+    pub branch_id: Option<Uuid>,
     pub due_date: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_by: Option<Uuid>,

@@ -1,52 +1,52 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct RefreshToken {
-    pub id: String,
-    pub user_id: String,
+    pub id: Uuid,
+    pub user_id: Uuid,
     pub token: String,
-    pub expires_at: String,
-    pub created_at: String,
-    pub revoked_at: Option<String>,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
 impl RefreshToken {
-    /// Create a new refresh token for a user (30 days expiry)
-    pub async fn create(pool: &SqlitePool, user_id: &str) -> AppResult<Self> {
-        let id = Uuid::new_v4().to_string();
+    pub async fn create(pool: &PgPool, user_id: &str) -> AppResult<Self> {
+        let id = Uuid::new_v4();
         let token = Uuid::new_v4().to_string();
-        let expires_at = (Utc::now() + Duration::days(30)).to_rfc3339();
+        let uid = Uuid::parse_str(user_id)
+            .map_err(|_| AppError::ValidationError("Invalid user id".to_string()))?;
+        let expires_at = Utc::now() + Duration::days(30);
 
         let refresh_token = sqlx::query_as::<_, RefreshToken>(
             r#"
             INSERT INTO refresh_tokens (id, user_id, token, expires_at)
-            VALUES (?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4)
             RETURNING *
             "#,
         )
-        .bind(&id)
-        .bind(user_id)
+        .bind(id)
+        .bind(uid)
         .bind(&token)
-        .bind(&expires_at)
+        .bind(expires_at)
         .fetch_one(pool)
         .await?;
 
         Ok(refresh_token)
     }
 
-    /// Find a valid (non-revoked, non-expired) refresh token
-    pub async fn find_valid(pool: &SqlitePool, token: &str) -> AppResult<Self> {
+    pub async fn find_valid(pool: &PgPool, token: &str) -> AppResult<Self> {
         let refresh_token = sqlx::query_as::<_, RefreshToken>(
             r#"
             SELECT * FROM refresh_tokens
-            WHERE token = ?
+            WHERE token = $1
             AND revoked_at IS NULL
-            AND datetime(expires_at) > datetime('now')
+            AND expires_at > NOW()
             "#,
         )
         .bind(token)
@@ -56,44 +56,43 @@ impl RefreshToken {
         Ok(refresh_token)
     }
 
-    /// Revoke this refresh token
-    pub async fn revoke(&self, pool: &SqlitePool) -> AppResult<()> {
+    pub async fn revoke(&self, pool: &PgPool) -> AppResult<()> {
         sqlx::query(
             r#"
             UPDATE refresh_tokens
-            SET revoked_at = datetime('now')
-            WHERE id = ?
+            SET revoked_at = NOW()
+            WHERE id = $1
             "#,
         )
-        .bind(&self.id)
+        .bind(self.id)
         .execute(pool)
         .await?;
 
         Ok(())
     }
 
-    /// Revoke all refresh tokens for a user (logout all devices)
-    pub async fn revoke_all_for_user(pool: &SqlitePool, user_id: &str) -> AppResult<()> {
+    pub async fn revoke_all_for_user(pool: &PgPool, user_id: &str) -> AppResult<()> {
+        let uid = Uuid::parse_str(user_id)
+            .map_err(|_| AppError::ValidationError("Invalid user id".to_string()))?;
         sqlx::query(
             r#"
             UPDATE refresh_tokens
-            SET revoked_at = datetime('now')
-            WHERE user_id = ? AND revoked_at IS NULL
+            SET revoked_at = NOW()
+            WHERE user_id = $1 AND revoked_at IS NULL
             "#,
         )
-        .bind(user_id)
+        .bind(uid)
         .execute(pool)
         .await?;
 
         Ok(())
     }
 
-    /// Clean up expired tokens (run periodically)
-    pub async fn cleanup_expired(pool: &SqlitePool) -> AppResult<u64> {
+    pub async fn cleanup_expired(pool: &PgPool) -> AppResult<u64> {
         let result = sqlx::query(
             r#"
             DELETE FROM refresh_tokens
-            WHERE datetime(expires_at) < datetime('now', '-7 days')
+            WHERE expires_at < NOW() - INTERVAL '7 days'
             "#,
         )
         .execute(pool)

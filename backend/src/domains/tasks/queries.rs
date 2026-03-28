@@ -1,11 +1,13 @@
+use crate::authz::data_scope::DataScope;
 use crate::core::cqrs::Query;
 use crate::models::Task;
-use serde::{Deserialize, Serialize};
 
 /// Get Task by ID Query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct GetTaskQuery {
     pub id: String,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Query for GetTaskQuery {
@@ -17,7 +19,7 @@ impl Query for GetTaskQuery {
 }
 
 /// List Tasks Query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ListTasksQuery {
     pub status: Option<String>,
     pub assigned_to: Option<String>,
@@ -29,6 +31,8 @@ pub struct ListTasksQuery {
     pub overdue: Option<bool>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Query for ListTasksQuery {
@@ -40,10 +44,12 @@ impl Query for ListTasksQuery {
 }
 
 /// Get Tasks by User Query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct GetTasksByUserQuery {
     pub user_id: String,
     pub status: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Query for GetTasksByUserQuery {
@@ -55,9 +61,11 @@ impl Query for GetTasksByUserQuery {
 }
 
 /// Get Tasks by Client Query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct GetTasksByClientQuery {
     pub client_id: String,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Query for GetTasksByClientQuery {

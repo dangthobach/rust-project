@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::core::events::{EventEnvelope, Projection};
 use crate::domains::file_system::events::FileSystemEvent;
@@ -8,11 +8,11 @@ use crate::domains::file_system::events::FileSystemEvent;
 /// Used by event consumer (to be implemented)
 #[allow(dead_code)]
 pub struct FileViewProjection {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl FileViewProjection {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -34,7 +34,7 @@ impl Projection for FileViewProjection {
                     INSERT INTO file_views (
                         id, name, path, parent_id, size, mime_type, owner_id,
                         item_type, created_at, updated_at, created_by
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'file', ?8, ?8, ?7)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'file', $8, $8, $7)
                     ON CONFLICT (id) DO NOTHING
                 "#,
                 )
@@ -51,7 +51,7 @@ impl Projection for FileViewProjection {
             }
             FileSystemEvent::FileMoved(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET parent_id = ?1, path = ?2, updated_at = ?3 WHERE id = ?4",
+                    "UPDATE file_views SET parent_id = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
                 .bind(e.new_parent_id.map(|id| id.to_string()))
                 .bind(&e.new_path)
@@ -62,7 +62,7 @@ impl Projection for FileViewProjection {
             }
             FileSystemEvent::FileDeleted(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3",
+                    "UPDATE file_views SET deleted_at = $1, deleted_by = $2 WHERE id = $3",
                 )
                 .bind(e.occurred_at.to_rfc3339())
                 .bind(e.deleted_by.to_string())
@@ -71,14 +71,14 @@ impl Projection for FileViewProjection {
                 .await?;
             }
             FileSystemEvent::FileRestored(e) => {
-                sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = ?1")
+                sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = $1")
                     .bind(e.file_id.to_string())
                     .execute(&self.pool)
                     .await?;
             }
             FileSystemEvent::FileRenamed(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET name = ?1, path = ?2, updated_at = ?3 WHERE id = ?4",
+                    "UPDATE file_views SET name = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
                 .bind(&e.new_name)
                 .bind(&e.new_path)
@@ -90,7 +90,7 @@ impl Projection for FileViewProjection {
             FileSystemEvent::FilePermissionsChanged(e) => {
                 // Update permissions in file_permissions table
                 // Delete old permissions
-                sqlx::query("DELETE FROM file_permissions WHERE file_id = ?1")
+                sqlx::query("DELETE FROM file_permissions WHERE file_id = $1")
                     .bind(e.file_id.to_string())
                     .execute(&self.pool)
                     .await?;
@@ -110,7 +110,7 @@ impl Projection for FileViewProjection {
                         sqlx::query(
                             r#"
                             INSERT INTO file_permissions (file_id, subject_type, subject_id, permission, inherited)
-                            VALUES (?1, ?2, ?3, ?4, ?5)
+                            VALUES ($1, $2, $3, $4, $5)
                             ON CONFLICT DO NOTHING
                         "#,
                         )
@@ -130,7 +130,7 @@ impl Projection for FileViewProjection {
                     INSERT INTO file_views (
                         id, name, path, parent_id, owner_id,
                         item_type, created_at, updated_at, created_by
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, 'folder', ?6, ?6, ?5)
+                    ) VALUES ($1, $2, $3, $4, $5, 'folder', $6, $6, $5)
                     ON CONFLICT (id) DO NOTHING
                 "#,
                 )
@@ -145,7 +145,7 @@ impl Projection for FileViewProjection {
             }
             FileSystemEvent::FolderMoved(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET parent_id = ?1, path = ?2, updated_at = ?3 WHERE id = ?4",
+                    "UPDATE file_views SET parent_id = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
                 .bind(e.new_parent_id.map(|id| id.to_string()))
                 .bind(&e.new_path)
@@ -156,7 +156,7 @@ impl Projection for FileViewProjection {
             }
             FileSystemEvent::FolderDeleted(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3",
+                    "UPDATE file_views SET deleted_at = $1, deleted_by = $2 WHERE id = $3",
                 )
                 .bind(e.occurred_at.to_rfc3339())
                 .bind(e.deleted_by.to_string())
@@ -165,14 +165,14 @@ impl Projection for FileViewProjection {
                 .await?;
             }
             FileSystemEvent::FolderRestored(e) => {
-                sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = ?1")
+                sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = $1")
                     .bind(e.folder_id.to_string())
                     .execute(&self.pool)
                     .await?;
             }
             FileSystemEvent::FolderRenamed(e) => {
                 sqlx::query(
-                    "UPDATE file_views SET name = ?1, path = ?2, updated_at = ?3 WHERE id = ?4",
+                    "UPDATE file_views SET name = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
                 .bind(&e.new_name)
                 .bind(&e.new_path)
@@ -197,7 +197,7 @@ impl Projection for FileViewProjection {
 
     async fn get_position(&self) -> Result<i64, Self::Error> {
         let position: Option<i64> = sqlx::query_scalar(
-            "SELECT position FROM projection_positions WHERE projection_name = ?1",
+            "SELECT position FROM projection_positions WHERE projection_name = $1",
         )
         .bind(self.projection_name())
         .fetch_optional(&self.pool)
@@ -210,8 +210,8 @@ impl Projection for FileViewProjection {
         sqlx::query(
             r#"
             INSERT INTO projection_positions (projection_name, position, updated_at)
-            VALUES (?1, ?2, datetime('now'))
-            ON CONFLICT (projection_name) DO UPDATE SET position = ?2, updated_at = datetime('now')
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (projection_name) DO UPDATE SET position = EXCLUDED.position, updated_at = NOW()
         "#,
         )
         .bind(self.projection_name())

@@ -81,7 +81,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
     let job_id_opt = job.job_id.clone();
 
     if let Some(job_id) = job_id_opt.as_deref() {
-        let _ = sqlx::query("UPDATE report_export_jobs SET status = 'processing' WHERE id = ?1")
+        let _ = sqlx::query("UPDATE report_export_jobs SET status = 'processing' WHERE id = $1")
             .bind(job_id)
             .execute(pool)
             .await;
@@ -206,7 +206,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
         // Update job row as soon as the object is stored.
         if let Some(job_id) = job_id_opt.as_deref() {
             let _ = sqlx::query(
-                "UPDATE report_export_jobs SET status = 'ready', object_uri = ?1 WHERE id = ?2",
+                "UPDATE report_export_jobs SET status = 'ready', object_uri = $1 WHERE id = $2",
             )
             .bind(&uri)
             .bind(job_id)
@@ -235,7 +235,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
     if let Err(ref e) = res {
         if let Some(job_id) = job_id_opt.as_deref() {
             let _ = sqlx::query(
-                "UPDATE report_export_jobs SET status = 'failed', error_message = ?1 WHERE id = ?2",
+                "UPDATE report_export_jobs SET status = 'failed', error_message = $1 WHERE id = $2",
             )
             .bind(e.to_string())
             .bind(job_id)

@@ -42,7 +42,7 @@ pub async fn get_current_user(
 ) -> AppResult<Json<User>> {
     let pool = state.pool();
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&user_id)
         .fetch_optional(pool)
         .await?
@@ -58,7 +58,7 @@ pub async fn get_user_profile(
 ) -> AppResult<Json<UserProfileResponse>> {
     let pool = state.pool();
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&user_id)
         .fetch_optional(pool)
         .await?
@@ -66,28 +66,28 @@ pub async fn get_user_profile(
 
     // Get user statistics
     let tasks_created: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE created_by = ?1"
+        "SELECT COUNT(*) FROM tasks WHERE created_by = $1"
     )
     .bind(&user_id)
     .fetch_one(pool)
     .await?;
 
     let tasks_completed: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE assigned_to = ?1 AND status = 'completed'"
+        "SELECT COUNT(*) FROM tasks WHERE assigned_to = $1 AND status = 'done'"
     )
     .bind(&user_id)
     .fetch_one(pool)
     .await?;
 
     let clients_assigned: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM clients WHERE assigned_to = ?1"
+        "SELECT COUNT(*) FROM clients WHERE assigned_to = $1"
     )
     .bind(&user_id)
     .fetch_one(pool)
     .await?;
 
     let files_uploaded: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM files WHERE uploaded_by = ?1"
+        "SELECT COUNT(*) FROM files WHERE uploaded_by = $1"
     )
     .bind(&user_id)
     .fetch_one(pool)
@@ -111,7 +111,7 @@ pub async fn get_user(
 ) -> AppResult<Json<User>> {
     let pool = state.pool();
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?
@@ -136,10 +136,10 @@ pub async fn update_user(
     sqlx::query(
         r#"
         UPDATE users
-        SET full_name = COALESCE(?1, full_name),
-            avatar_url = COALESCE(?2, avatar_url),
-            updated_at = datetime('now')
-        WHERE id = ?3
+        SET full_name = COALESCE($1, full_name),
+            avatar_url = COALESCE($2, avatar_url),
+            updated_at = NOW()
+        WHERE id = $3
         "#,
     )
     .bind(&payload.full_name)
@@ -148,7 +148,7 @@ pub async fn update_user(
     .execute(pool)
     .await?;
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?
@@ -173,7 +173,7 @@ pub async fn change_password(
     }
 
     // Get current user
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(&user_id)
         .fetch_optional(pool)
         .await?
@@ -188,7 +188,7 @@ pub async fn change_password(
     let new_hash = password::hash(&payload.new_password)?;
 
     // Update password
-    sqlx::query("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE id = ?2")
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
         .bind(&new_hash)
         .bind(&user_id)
         .execute(pool)
@@ -276,7 +276,7 @@ pub async fn upload_avatar(
     })?;
 
     // Delete old avatar if exists
-    let old_avatar: Option<String> = sqlx::query_scalar("SELECT avatar_url FROM users WHERE id = ?1")
+    let old_avatar: Option<String> = sqlx::query_scalar("SELECT avatar_url FROM users WHERE id = $1")
         .bind(&user_id)
         .fetch_optional(pool)
         .await?;
@@ -289,7 +289,7 @@ pub async fn upload_avatar(
 
     // Update user avatar URL
     let avatar_url = format!("/{}", avatar_path);
-    sqlx::query("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE id = ?2")
+    sqlx::query("UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2")
         .bind(&avatar_url)
         .bind(&user_id)
         .execute(pool)

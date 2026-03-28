@@ -25,7 +25,7 @@ use crate::core::shared::Pagination;
 use crate::domains::file_system::commands::*;
 use crate::domains::file_system::queries::*;
 use crate::domains::file_system::handlers::{command_handlers::*, query_handlers::*};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 // ============================================================================
 // Request/Response DTOs (HTTP Layer)
@@ -115,7 +115,7 @@ pub async fn create_file(
 
 /// Get File - Dispatches to CQRS GetFileQuery
 pub async fn get_file(
-    State((pool, _config)): State<(SqlitePool, Config)>,
+    State((pool, _config)): State<(PgPool, Config)>,
     Extension(user_id): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -135,7 +135,7 @@ pub async fn get_file(
 
 /// List Files - Dispatches to CQRS ListFilesQuery
 pub async fn list_files(
-    State((pool, _config)): State<(SqlitePool, Config)>,
+    State((pool, _config)): State<(PgPool, Config)>,
     Extension(user_id): Extension<Uuid>,
     Query(params): Query<ListFilesParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -272,7 +272,7 @@ pub async fn create_folder(
 
 /// Get Folder Tree - Dispatches to CQRS GetFolderTreeQuery
 pub async fn get_folder_tree(
-    State((pool, _config)): State<(SqlitePool, Config)>,
+    State((pool, _config)): State<(PgPool, Config)>,
     Extension(user_id): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -293,7 +293,7 @@ pub async fn get_folder_tree(
 
 /// Search Files - Dispatches to CQRS SearchFilesQuery
 pub async fn search_files(
-    State((pool, _config)): State<(SqlitePool, Config)>,
+    State((pool, _config)): State<(PgPool, Config)>,
     Extension(user_id): Extension<Uuid>,
     Query(params): Query<SearchFilesParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -337,7 +337,7 @@ fn build_event_bus(config: &Config) -> Result<Arc<dyn EventBus + Send + Sync>, (
 /// Build FileSystemService with all dependencies
 ///
 /// In production, these should be cached/pooled for reuse
-fn build_file_service(pool: SqlitePool) -> Arc<FileSystemService> {
+fn build_file_service(pool: PgPool) -> Arc<FileSystemService> {
     // Build Event Store
     let event_store = PostgresEventStore::new(pool.clone());
 

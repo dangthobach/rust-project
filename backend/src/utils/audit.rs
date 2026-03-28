@@ -1,5 +1,6 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use serde::Serialize;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 pub struct AuditLog {
@@ -16,7 +17,7 @@ pub struct AuditLog {
 
 /// Log an audit event
 pub async fn log_audit(
-    pool: &SqlitePool,
+    pool: &PgPool,
     user_id: &str,
     action: &str,
     resource_type: &str,
@@ -25,16 +26,20 @@ pub async fn log_audit(
     ip_address: Option<&str>,
     user_agent: Option<&str>,
 ) {
-    let id = uuid::Uuid::new_v4().to_string();
-    
+    let id = Uuid::new_v4();
+    let Ok(uid) = Uuid::parse_str(user_id) else {
+        tracing::warn!("audit: skip invalid user_id");
+        return;
+    };
+
     let result = sqlx::query(
         r#"
-        INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+        INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address, user_agent)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
-    .bind(&id)
-    .bind(user_id)
+    .bind(id)
+    .bind(uid)
     .bind(action)
     .bind(resource_type)
     .bind(resource_id)

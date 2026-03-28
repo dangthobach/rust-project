@@ -36,7 +36,7 @@ pub async fn register(
     tracing::info!(email = %payload.email, "User registration attempt");
 
     // Check if user already exists
-    let existing_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?1")
+    let existing_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&payload.email)
         .fetch_optional(pool)
         .await?;
@@ -57,10 +57,10 @@ pub async fn register(
     sqlx::query(
         r#"
         INSERT INTO users (id, email, password_hash, full_name, role)
-        VALUES (?1, ?2, ?3, ?4, 'user')
+        VALUES ($1, $2, $3, $4, 'user')
         "#,
     )
-    .bind(user_id.to_string())
+    .bind(user_id)
     .bind(&payload.email)
     .bind(&password_hash)
     .bind(&payload.full_name)
@@ -69,23 +69,40 @@ pub async fn register(
 
     sqlx::query(
         r#"
-        INSERT OR IGNORE INTO user_roles (user_id, role_id)
-        SELECT ?1, r.id FROM roles r WHERE r.slug = 'user' LIMIT 1
+        INSERT INTO user_roles (user_id, role_id)
+        SELECT $1, r.id FROM roles r WHERE r.slug = 'user' LIMIT 1
+        ON CONFLICT DO NOTHING
         "#,
     )
-    .bind(user_id.to_string())
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    let default_branch =
+        uuid::Uuid::parse_str("00000000-0000-0000-0000-0000000000b1").map_err(|_| {
+            AppError::InternalServerError("invalid default branch id".to_string())
+        })?;
+    sqlx::query(
+        r#"
+        INSERT INTO user_branches (user_id, branch_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        "#,
+    )
+    .bind(user_id)
+    .bind(default_branch)
     .execute(pool)
     .await?;
 
     // Fetch created user
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1")
-        .bind(user_id.to_string())
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
         .fetch_one(pool)
         .await?;
 
     // Generate tokens
-    let access_token = jwt::generate_token(&user.id)?;
-    let refresh_token = RefreshToken::create(pool, &user.id).await?;
+    let access_token = jwt::generate_token(&user.id.to_string())?;
+    let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
     tracing::info!(user_id = %user.id, role = %user.role, "User registered successfully");
 
@@ -108,7 +125,7 @@ pub async fn register(
     });
     let _ = state
         .kafka_publisher
-        .publish("crm.domain.user", &user.id, &domain_event.to_string())
+        .publish("crm.domain.user", &user.id.to_string(), &domain_event.to_string())
         .await;
 
     Ok((
@@ -137,7 +154,7 @@ pub async fn login(
     tracing::info!(email = %payload.email, "Login attempt");
 
     // Find user by email
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?1")
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&payload.email)
         .fetch_optional(pool)
         .await?
@@ -162,8 +179,8 @@ pub async fn login(
     }
 
     // Generate tokens
-    let access_token = jwt::generate_token(&user.id)?;
-    let refresh_token = RefreshToken::create(pool, &user.id).await?;
+    let access_token = jwt::generate_token(&user.id.to_string())?;
+    let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
     tracing::info!(user_id = %user.id, role = %user.role, "Login successful");
 
@@ -192,14 +209,14 @@ pub async fn refresh(
     old_refresh_token.revoke(pool).await?;
 
     // Fetch user
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ? AND is_active = 1")
-        .bind(&old_refresh_token.user_id)
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 AND is_active = TRUE")
+        .bind(old_refresh_token.user_id)
         .fetch_one(pool)
         .await?;
 
     // Generate new tokens
-    let access_token = jwt::generate_token(&user.id)?;
-    let new_refresh_token = RefreshToken::create(pool, &user.id).await?;
+    let access_token = jwt::generate_token(&user.id.to_string())?;
+    let new_refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
     tracing::info!(user_id = %user.id, "Token refreshed successfully");
 

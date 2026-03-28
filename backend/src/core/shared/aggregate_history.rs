@@ -1,10 +1,10 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
 
 pub async fn append_aggregate_history(
-    pool: &SqlitePool,
+    pool: &PgPool,
     aggregate_type: &str,
     aggregate_id: &str,
     action: &str,
@@ -19,10 +19,10 @@ pub async fn append_aggregate_history(
         INSERT INTO aggregate_history (
             id, aggregate_type, aggregate_id, action, old_status, new_status, actor_id, comment, metadata
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#,
     )
-    .bind(Uuid::new_v4().to_string())
+    .bind(Uuid::new_v4())
     .bind(aggregate_type)
     .bind(aggregate_id)
     .bind(action)

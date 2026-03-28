@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -11,12 +11,12 @@ use crate::domains::file_system::aggregates::{File, Folder};
 pub struct FileSystemService {
     file_repo: Arc<crate::core::infrastructure::PostgresRepository<File>>,
     folder_repo: Arc<crate::core::infrastructure::PostgresRepository<Folder>>,
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl FileSystemService {
     pub fn new(
-        pool: SqlitePool,
+        pool: PgPool,
         file_repo: Arc<crate::core::infrastructure::PostgresRepository<File>>,
         folder_repo: Arc<crate::core::infrastructure::PostgresRepository<Folder>>,
     ) -> Self {
@@ -35,7 +35,7 @@ impl FileSystemService {
     ) -> Result<String, sqlx::Error> {
         if let Some(parent_id) = parent_id {
             let parent_path: Option<(String,)> = sqlx::query_as(
-                "SELECT path FROM file_views WHERE id = ?1 AND item_type = 'folder'",
+                "SELECT path FROM file_views WHERE id = $1 AND item_type = 'folder'",
             )
             .bind(parent_id.to_string())
             .fetch_optional(&self.pool)
@@ -66,7 +66,7 @@ impl FileSystemService {
         
         let exists: Option<i64> = if let Some(exclude_id) = exclude_id {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM file_views WHERE name = ?1 AND (parent_id = ?2 OR (parent_id IS NULL AND ?2 IS NULL)) AND id != ?3 AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM file_views WHERE name = $1 AND (parent_id = $2 OR (parent_id IS NULL AND $2 IS NULL)) AND id != $3 AND deleted_at IS NULL",
             )
             .bind(name)
             .bind(&parent_id_str)
@@ -75,7 +75,7 @@ impl FileSystemService {
             .await?
         } else {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM file_views WHERE name = ?1 AND (parent_id = ?2 OR (parent_id IS NULL AND ?2 IS NULL)) AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM file_views WHERE name = $1 AND (parent_id = $2 OR (parent_id IS NULL AND $2 IS NULL)) AND deleted_at IS NULL",
             )
             .bind(name)
             .bind(&parent_id_str)
@@ -95,7 +95,7 @@ impl FileSystemService {
     ) -> Result<bool, sqlx::Error> {
         // Check if user is owner
         let owner: Option<String> = sqlx::query_scalar(
-            "SELECT owner_id FROM file_views WHERE id = ?1",
+            "SELECT owner_id FROM file_views WHERE id = $1",
         )
         .bind(file_id.to_string())
         .fetch_optional(&self.pool)
@@ -114,15 +114,15 @@ impl FileSystemService {
         let has_permission: Option<i64> = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM file_permissions
-            WHERE file_id = ?1
+            WHERE file_id = $1
             AND (
-                (subject_type = 'user' AND subject_id = ?2)
+                (subject_type = 'user' AND subject_id = $2)
                 OR (subject_type = 'everyone')
                 OR (subject_type = 'group' AND subject_id IN (
-                    SELECT group_id FROM user_groups WHERE user_id = ?2
+                    SELECT group_id FROM user_groups WHERE user_id = $2
                 ))
             )
-            AND permission IN (?3, 'admin')
+            AND permission IN ($3, 'admin')
         "#,
         )
         .bind(file_id.to_string())

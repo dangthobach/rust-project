@@ -1,0 +1,10 @@
+-- SQLite không có khái niệm user/mật khẩu cấp máy chủ như PostgreSQL hay MySQL.
+-- "Quản trị" file database = quyền trên filesystem (đọc/ghi file .db).
+--
+-- Tạo file DB và schema:
+--   cd backend
+--   set DATABASE_URL=sqlite:./data/crm.db
+--   sqlx migrate run --source ./migrations
+-- (hoặc khởi động backend một lần — migrate chạy trong main.rs)
+--
+-- User đăng nhập ứng dụng (admin / app) nằm trong bảng users, không phải account SQLite.

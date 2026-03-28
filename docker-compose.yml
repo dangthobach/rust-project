@@ -1,14 +1,36 @@
 version: '3.9'
 
 services:
-  # Backend API Service (SQLite)
+  # PostgreSQL 17 — database for CRM (on-premise / Docker)
+  postgres:
+    image: postgres:17-alpine
+    container_name: neo-crm-postgres
+    environment:
+      POSTGRES_USER: crm_app
+      POSTGRES_PASSWORD: crm_app
+      POSTGRES_DB: crm
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm_app -d crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # Backend API Service
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: neo-crm-backend
     environment:
-      DATABASE_URL: sqlite:///app/data/crm.db
+      DATABASE_URL: postgresql://crm_app:crm_app@postgres:5432/crm
       RUST_LOG: info
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       # Enables Redis Streams event bus (CQRS/Event streaming parts)
@@ -23,6 +45,8 @@ services:
       - "3000:3000"  # API port
       - "9090:9090"  # Metrics port
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:
@@ -137,6 +161,8 @@ services:
       - monitoring
 
 volumes:
+  postgres-data:
+    driver: local
   backend-data:
     driver: local
   backend-uploads:

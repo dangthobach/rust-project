@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
@@ -71,26 +71,20 @@ pub async fn get_activities(
     let pool = state.pool();
     let offset = (params.page - 1) * params.limit;
 
-    // Build query with optional filters
-    let mut query = String::from("SELECT * FROM activities WHERE 1=1");
-    let mut count_query = String::from("SELECT COUNT(*) as count FROM activities WHERE 1=1");
-
-    if params.entity_type.is_some() {
-        query.push_str(" AND entity_type = ?");
-        count_query.push_str(" AND entity_type = ?");
+    let mut count_qb = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM activities WHERE 1=1");
+    if let Some(ref et) = params.entity_type {
+        count_qb.push(" AND entity_type = ");
+        count_qb.push_bind(et);
     }
-
-    if params.user_id.is_some() {
-        query.push_str(" AND user_id = ?");
-        count_query.push_str(" AND user_id = ?");
+    if let Some(ref uid) = params.user_id {
+        let user_uuid = Uuid::parse_str(uid).map_err(|_| {
+            AppError::BadRequest("Invalid user_id filter".to_string())
+        })?;
+        count_qb.push(" AND user_id = ");
+        count_qb.push_bind(user_uuid);
     }
-
-    query.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
-
-    // Get total count
-    let total: i64 = sqlx::query_scalar::<_, i64>(&count_query)
-        .bind(params.entity_type.as_ref())
-        .bind(params.user_id.as_ref())
+    let total: i64 = count_qb
+        .build_query_scalar()
         .fetch_one(pool)
         .await
         .map_err(|e| {
@@ -98,12 +92,25 @@ pub async fn get_activities(
             AppError::InternalServerError("Failed to count activities".to_string())
         })?;
 
-    // Get activities
-    let activities = sqlx::query_as::<_, Activity>(&query)
-        .bind(params.entity_type.as_ref())
-        .bind(params.user_id.as_ref())
-        .bind(params.limit)
-        .bind(offset)
+    let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM activities WHERE 1=1");
+    if let Some(ref et) = params.entity_type {
+        qb.push(" AND entity_type = ");
+        qb.push_bind(et);
+    }
+    if let Some(ref uid) = params.user_id {
+        let user_uuid = Uuid::parse_str(uid).map_err(|_| {
+            AppError::BadRequest("Invalid user_id filter".to_string())
+        })?;
+        qb.push(" AND user_id = ");
+        qb.push_bind(user_uuid);
+    }
+    qb.push(" ORDER BY created_at DESC LIMIT ");
+    qb.push_bind(params.limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+
+    let activities = qb
+        .build_query_as::<Activity>()
         .fetch_all(pool)
         .await
         .map_err(|e| {
@@ -162,20 +169,25 @@ pub async fn create_activity(
         .map_err(|_| AppError::BadRequest("Invalid user ID".to_string()))?;
     let now = Utc::now();
 
+    let metadata_str = request
+        .metadata
+        .as_ref()
+        .map(|m| serde_json::to_string(m).unwrap_or_default());
+
     let activity = sqlx::query_as::<_, Activity>(
         r#"
         INSERT INTO activities (id, user_id, entity_type, entity_id, action, description, metadata, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
         "#,
     )
     .bind(activity_id)
     .bind(user_uuid)
     .bind(&request.entity_type)
-    .bind(&request.entity_id)
+    .bind(request.entity_id.to_string())
     .bind(&request.action)
     .bind(&request.description)
-    .bind(&request.metadata)
+    .bind(metadata_str)
     .bind(now)
     .fetch_one(pool)
     .await
@@ -239,7 +251,7 @@ fn format_relative_time(dt: &chrono::DateTime<Utc>) -> String {
 
 /// Helper function to log activity (can be called from other handlers)
 pub async fn log_activity(
-    pool: &SqlitePool,
+    pool: &PgPool,
     user_id: Uuid,
     entity_type: &str,
     entity_id: Uuid,
@@ -252,13 +264,13 @@ pub async fn log_activity(
     sqlx::query(
         r#"
         INSERT INTO activities (id, user_id, entity_type, entity_id, action, description, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(activity_id)
     .bind(user_id)
     .bind(entity_type)
-    .bind(entity_id)
+    .bind(entity_id.to_string())
     .bind(action)
     .bind(description)
     .bind(now)

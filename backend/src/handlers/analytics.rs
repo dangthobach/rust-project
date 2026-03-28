@@ -174,7 +174,7 @@ pub async fn get_user_activity_analytics(
     // Total activities in date range
     let total_activities: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM activities
-         WHERE date(created_at) BETWEEN ? AND ?"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -185,7 +185,7 @@ pub async fn get_user_activity_analytics(
     // Unique active users
     let unique_active_users: i64 = sqlx::query_scalar(
         "SELECT COUNT(DISTINCT user_id) FROM activities 
-         WHERE date(created_at) BETWEEN ? AND ?"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -198,11 +198,11 @@ pub async fn get_user_activity_analytics(
 
     // Most active users (top 10)
     let most_active_users = sqlx::query_as::<_, (String, String, Option<String>, i64)>(
-        "SELECT a.user_id, u.name, u.avatar_url, COUNT(*) as activity_count
+        "SELECT a.user_id::text, u.full_name, u.avatar_url, COUNT(*) as activity_count
          FROM activities a
          JOIN users u ON a.user_id = u.id
-         WHERE date(a.created_at) BETWEEN ? AND ?
-         GROUP BY a.user_id
+         WHERE (a.created_at::date) BETWEEN $1::date AND $2::date
+         GROUP BY a.user_id, u.full_name, u.avatar_url
          ORDER BY activity_count DESC
          LIMIT 10"
     )
@@ -224,7 +224,7 @@ pub async fn get_user_activity_analytics(
     let activity_by_type = sqlx::query_as::<_, (String, i64)>(
         "SELECT action, COUNT(*) as count
          FROM activities
-         WHERE date(created_at) BETWEEN ? AND ?
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
          GROUP BY action
          ORDER BY count DESC"
     )
@@ -243,11 +243,11 @@ pub async fn get_user_activity_analytics(
 
     // Daily activity trend
     let daily_activity = sqlx::query_as::<_, (String, i64)>(
-        "SELECT date(created_at) as date, COUNT(*) as count
+        "SELECT (created_at::date)::text as date, COUNT(*) as count
          FROM activities
-         WHERE date(created_at) BETWEEN ? AND ?
-         GROUP BY date(created_at)
-         ORDER BY date(created_at)"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
+         GROUP BY created_at::date
+         ORDER BY created_at::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -280,7 +280,7 @@ pub async fn get_task_completion_analytics(
     // Total tasks created in range
     let total_tasks: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -291,8 +291,8 @@ pub async fn get_task_completion_analytics(
     // Completed tasks
     let completed_tasks: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks 
-         WHERE status = 'completed'
-         AND date(created_at) BETWEEN ? AND ?"
+         WHERE status = 'done'
+         AND (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -308,10 +308,10 @@ pub async fn get_task_completion_analytics(
 
     // Average completion time (hours between created and updated for completed tasks)
     let average_completion_time_hours: f64 = sqlx::query_scalar(
-        "SELECT AVG((julianday(updated_at) - julianday(created_at)) * 24)
+        "SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600.0), 0)
          FROM tasks
-         WHERE status = 'completed'
-         AND date(created_at) BETWEEN ? AND ?"
+         WHERE status = 'done'
+         AND (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -323,7 +323,7 @@ pub async fn get_task_completion_analytics(
     let completion_by_status = sqlx::query_as::<_, (String, i64)>(
         "SELECT status, COUNT(*) as count
          FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
          GROUP BY status
          ORDER BY count DESC"
     )
@@ -344,7 +344,7 @@ pub async fn get_task_completion_analytics(
     let completion_by_priority = sqlx::query_as::<_, (String, i64)>(
         "SELECT priority, COUNT(*) as count
          FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
          GROUP BY priority
          ORDER BY count DESC"
     )
@@ -364,13 +364,13 @@ pub async fn get_task_completion_analytics(
     // Daily completion trend
     let daily_completions = sqlx::query_as::<_, (String, i64, i64)>(
         "SELECT 
-            date(created_at) as date,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+            (created_at::date)::text as date,
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as completed_count,
             COUNT(*) as created_count
          FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?
-         GROUP BY date(created_at)
-         ORDER BY date(created_at)"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
+         GROUP BY created_at::date
+         ORDER BY created_at::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -431,7 +431,7 @@ pub async fn get_client_engagement_analytics(
     let average_tasks_per_client: f64 = sqlx::query_scalar(
         "SELECT CAST(COUNT(*) AS REAL) / NULLIF(COUNT(DISTINCT client_id), 0)
          FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -442,7 +442,7 @@ pub async fn get_client_engagement_analytics(
     // Clients with recent activity
     let clients_with_recent_activity: i64 = sqlx::query_scalar(
         "SELECT COUNT(DISTINCT client_id) FROM tasks
-         WHERE date(created_at) BETWEEN ? AND ?"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -458,7 +458,7 @@ pub async fn get_client_engagement_analytics(
             SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed_tasks
          FROM clients c
          LEFT JOIN tasks t ON c.id = t.client_id
-         WHERE date(t.created_at) BETWEEN ? AND ?
+         WHERE (t.created_at::date) BETWEEN $1::date AND $2::date
          GROUP BY c.id
          ORDER BY task_count DESC
          LIMIT 10"
@@ -479,11 +479,11 @@ pub async fn get_client_engagement_analytics(
 
     // New clients trend
     let new_clients_trend = sqlx::query_as::<_, (String, i64)>(
-        "SELECT date(created_at) as date, COUNT(*) as new_clients
+        "SELECT (created_at::date)::text as date, COUNT(*) as new_clients
          FROM clients
-         WHERE date(created_at) BETWEEN ? AND ?
-         GROUP BY date(created_at)
-         ORDER BY date(created_at)"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
+         GROUP BY created_at::date
+         ORDER BY created_at::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)
@@ -564,13 +564,13 @@ pub async fn get_storage_analytics(
     // Storage by user (top 10)
     let storage_by_user = sqlx::query_as::<_, (String, String, i64, i64)>(
         "SELECT 
-            f.uploaded_by as user_id,
-            u.name as user_name,
+            f.uploaded_by::text as user_id,
+            u.full_name as user_name,
             COUNT(f.id) as file_count,
             COALESCE(SUM(f.file_size), 0) as total_size
          FROM files f
          JOIN users u ON f.uploaded_by = u.id
-         GROUP BY f.uploaded_by
+         GROUP BY f.uploaded_by, u.full_name
          ORDER BY total_size DESC
          LIMIT 10"
     )
@@ -589,13 +589,13 @@ pub async fn get_storage_analytics(
     // Daily upload trend
     let daily_upload_trend = sqlx::query_as::<_, (String, i64, i64)>(
         "SELECT 
-            date(created_at) as date,
+            (created_at::date)::text as date,
             COUNT(*) as file_count,
             COALESCE(SUM(file_size), 0) as total_size
          FROM files
-         WHERE date(created_at) BETWEEN ? AND ?
-         GROUP BY date(created_at)
-         ORDER BY date(created_at)"
+         WHERE (created_at::date) BETWEEN $1::date AND $2::date
+         GROUP BY created_at::date
+         ORDER BY created_at::date"
     )
     .bind(&params.start_date)
     .bind(&params.end_date)

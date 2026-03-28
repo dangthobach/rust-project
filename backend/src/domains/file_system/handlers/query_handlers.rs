@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::core::cqrs::QueryHandler;
@@ -7,11 +7,11 @@ use crate::domains::file_system::queries::*;
 
 /// Get File Handler
 pub struct GetFileHandler {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl GetFileHandler {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -28,7 +28,7 @@ impl QueryHandler<GetFileQuery> for GetFileHandler {
             SELECT id, name, path, parent_id, size, mime_type, owner_id, item_type,
                    created_at, updated_at
             FROM file_views
-            WHERE id = ?1 AND deleted_at IS NULL
+            WHERE id = $1 AND deleted_at IS NULL
         "#,
         )
         .bind(query.file_id.to_string())
@@ -41,11 +41,11 @@ impl QueryHandler<GetFileQuery> for GetFileHandler {
 
 /// List Files Handler
 pub struct ListFilesHandler {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl ListFilesHandler {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -63,9 +63,9 @@ impl QueryHandler<ListFilesQuery> for ListFilesHandler {
             SELECT id, name, path, parent_id, size, mime_type, owner_id, item_type,
                    created_at, updated_at
             FROM file_views
-            WHERE (parent_id = ?1 OR (parent_id IS NULL AND ?1 IS NULL)) AND deleted_at IS NULL
+            WHERE (parent_id = $1 OR (parent_id IS NULL AND $1 IS NULL)) AND deleted_at IS NULL
             ORDER BY item_type DESC, name ASC
-            LIMIT ?2 OFFSET ?3
+            LIMIT $2 OFFSET $3
         "#,
         )
         .bind(&parent_id_str)
@@ -80,11 +80,11 @@ impl QueryHandler<ListFilesQuery> for ListFilesHandler {
 
 /// Get Folder Tree Handler
 pub struct GetFolderTreeHandler {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl GetFolderTreeHandler {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -102,7 +102,7 @@ impl QueryHandler<GetFolderTreeQuery> for GetFolderTreeHandler {
             SELECT id, name, path, parent_id, size, mime_type, owner_id, item_type,
                    created_at, updated_at
             FROM file_views
-            WHERE id = ?1 AND item_type = 'folder' AND deleted_at IS NULL
+            WHERE id = $1 AND item_type = 'folder' AND deleted_at IS NULL
         "#,
         )
         .bind(query.folder_id.to_string())
@@ -140,7 +140,7 @@ impl GetFolderTreeHandler {
                 SELECT id, name, path, parent_id, size, mime_type, owner_id, item_type,
                        created_at, updated_at
                 FROM file_views
-                WHERE parent_id = ?1 AND item_type = 'folder' AND deleted_at IS NULL
+                WHERE parent_id = $1 AND item_type = 'folder' AND deleted_at IS NULL
                 ORDER BY name ASC
             "#,
             )
@@ -167,11 +167,11 @@ impl GetFolderTreeHandler {
 
 /// Search Files Handler
 pub struct SearchFilesHandler {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl SearchFilesHandler {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -192,9 +192,9 @@ impl QueryHandler<SearchFilesQuery> for SearchFilesHandler {
                    created_at, updated_at
             FROM file_views
             WHERE deleted_at IS NULL
-            AND (name LIKE ?1 OR path LIKE ?1)
+            AND (name LIKE $1 OR path LIKE $1)
             ORDER BY name ASC
-            LIMIT ?2 OFFSET ?3
+            LIMIT $2 OFFSET $3
         "#,
         )
         .bind(&search_pattern)

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 /// Short TTL cache: avoids one DISTINCT JOIN per request under load; stale up to TTL after role changes.
@@ -19,7 +19,7 @@ static PERMISSION_CACHE: std::sync::LazyLock<DashMap<Uuid, CacheEntry>> =
 
 /// Single round-trip: all roles × permissions resolved with DISTINCT.
 pub async fn load_effective_permissions(
-    pool: &SqlitePool,
+    pool: &PgPool,
     user_id: Uuid,
 ) -> Result<Arc<BTreeSet<String>>, sqlx::Error> {
     let now = Instant::now();
@@ -39,7 +39,7 @@ pub async fn load_effective_permissions(
             ON rp.role_id = r.id
         INNER JOIN permissions p
             ON p.code = rp.permission_code AND p.is_active = 1
-        WHERE ur.user_id = ?1
+        WHERE ur.user_id = $1
         "#,
     )
     .bind(user_id.to_string())

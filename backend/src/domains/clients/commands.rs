@@ -1,29 +1,33 @@
+use crate::authz::data_scope::DataScope;
 use crate::core::cqrs::Command;
 use crate::models::Client;
-use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 /// Create Client Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct CreateClientCommand {
     #[validate(length(min = 1, max = 255))]
     pub name: String,
-    
+
     #[validate(email)]
     pub email: Option<String>,
-    
+
     #[validate(length(min = 1, max = 50))]
     pub phone: Option<String>,
-    
+
     #[validate(length(max = 500))]
     pub address: Option<String>,
-    
+
     pub company: Option<String>,
     pub position: Option<String>,
     pub status: Option<String>,
     pub assigned_to: Option<String>,
     pub notes: Option<String>,
     pub actor_id: Option<String>,
+    /// Target branch (`branches.id`); default root in handler.
+    pub branch_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for CreateClientCommand {
@@ -35,29 +39,31 @@ impl Command for CreateClientCommand {
 }
 
 /// Update Client Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct UpdateClientCommand {
     #[validate(length(min = 1))]
     pub id: String,
-    
+
     #[validate(length(min = 1, max = 255))]
     pub name: Option<String>,
-    
+
     #[validate(email)]
     pub email: Option<String>,
-    
+
     #[validate(length(min = 1, max = 50))]
     pub phone: Option<String>,
-    
+
     #[validate(length(max = 500))]
     pub address: Option<String>,
-    
+
     pub company: Option<String>,
     pub position: Option<String>,
     pub status: Option<String>,
     pub assigned_to: Option<String>,
     pub notes: Option<String>,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for UpdateClientCommand {
@@ -69,11 +75,13 @@ impl Command for UpdateClientCommand {
 }
 
 /// Delete Client Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct DeleteClientCommand {
     #[validate(length(min = 1))]
     pub id: String,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for DeleteClientCommand {

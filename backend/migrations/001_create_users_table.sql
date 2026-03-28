@@ -1,25 +1,31 @@
--- Create users table (SQLite compatible)
+-- PostgreSQL 17: users + shared updated_at trigger function
+CREATE OR REPLACE FUNCTION trg_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY NOT NULL,
-    email TEXT UNIQUE NOT NULL,
+    id UUID PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user', -- 'admin', 'manager', 'user'
+    role TEXT NOT NULL DEFAULT 'user',
     avatar_url TEXT,
-    is_active INTEGER DEFAULT 1, -- SQLite uses INTEGER for BOOLEAN
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create indexes on commonly queried fields
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
 
--- Create trigger for updated_at (SQLite compatible)
-CREATE TRIGGER IF NOT EXISTS update_users_updated_at
-AFTER UPDATE ON users
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+CREATE TRIGGER update_users_updated_at
+BEFORE UPDATE ON users
 FOR EACH ROW
-BEGIN
-    UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
+EXECUTE FUNCTION trg_set_updated_at();

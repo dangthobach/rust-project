@@ -169,7 +169,7 @@ pub async fn create_user_admin(
     });
     let _ = state
         .kafka_publisher
-        .publish("crm.domain.user", &user.id, &event.to_string())
+        .publish("crm.domain.user", &user.id.to_string(), &event.to_string())
         .await;
 
     Ok((StatusCode::CREATED, Json(user)))
@@ -203,7 +203,7 @@ pub async fn update_user_admin(
     });
     let _ = state
         .kafka_publisher
-        .publish("crm.domain.user", &user.id, &event.to_string())
+        .publish("crm.domain.user", &user.id.to_string(), &event.to_string())
         .await;
 
     Ok(Json(user))

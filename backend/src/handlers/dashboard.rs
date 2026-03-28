@@ -1,6 +1,6 @@
 use axum::{extract::{Query, State}, Extension, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::app_state::AppState;
 use crate::error::AppError;
@@ -81,7 +81,7 @@ pub async fn get_dashboard_stats(
     }))
 }
 
-async fn get_client_stats(pool: &SqlitePool) -> Result<ClientStats, AppError> {
+async fn get_client_stats(pool: &PgPool) -> Result<ClientStats, AppError> {
     // Total clients
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM clients")
         .fetch_one(pool)
@@ -105,7 +105,7 @@ async fn get_client_stats(pool: &SqlitePool) -> Result<ClientStats, AppError> {
 
     // New this week (last 7 days)
     let new_this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM clients WHERE created_at >= datetime('now', '-7 days')",
+        "SELECT COUNT(*) FROM clients WHERE created_at >= NOW() - INTERVAL '7 days'",
     )
     .fetch_one(pool)
     .await
@@ -113,7 +113,7 @@ async fn get_client_stats(pool: &SqlitePool) -> Result<ClientStats, AppError> {
 
     // New this month (last 30 days)
     let new_this_month: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM clients WHERE created_at >= datetime('now', '-30 days')",
+        "SELECT COUNT(*) FROM clients WHERE created_at >= NOW() - INTERVAL '30 days'",
     )
     .fetch_one(pool)
     .await
@@ -128,7 +128,7 @@ async fn get_client_stats(pool: &SqlitePool) -> Result<ClientStats, AppError> {
     })
 }
 
-async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
+async fn get_task_stats(pool: &PgPool) -> Result<TaskStats, AppError> {
     // Total tasks
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
         .fetch_one(pool)
@@ -163,7 +163,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Overdue tasks (due_date < now AND status != completed)
     let overdue: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE due_date < datetime('now') AND status != 'done'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date < NOW() AND status != 'done'",
     )
     .fetch_one(pool)
     .await
@@ -171,7 +171,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Due today
     let due_today: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE date(due_date) = date('now') AND status != 'done'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date::date = CURRENT_DATE AND status != 'done'",
     )
     .fetch_one(pool)
     .await
@@ -179,7 +179,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
 
     // Due this week
     let due_this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE due_date BETWEEN datetime('now') AND datetime('now', '+7 days') AND status != 'done'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date >= NOW() AND due_date < NOW() + INTERVAL '7 days' AND status != 'done'",
     )
     .fetch_one(pool)
     .await
@@ -197,7 +197,7 @@ async fn get_task_stats(pool: &SqlitePool) -> Result<TaskStats, AppError> {
     })
 }
 
-async fn get_file_stats(pool: &SqlitePool) -> Result<FileStats, AppError> {
+async fn get_file_stats(pool: &PgPool) -> Result<FileStats, AppError> {
     // Total files
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
         .fetch_one(pool)
@@ -212,7 +212,7 @@ async fn get_file_stats(pool: &SqlitePool) -> Result<FileStats, AppError> {
 
     // Uploaded this week
     let uploaded_this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM files WHERE created_at >= datetime('now', '-7 days')",
+        "SELECT COUNT(*) FROM files WHERE created_at >= NOW() - INTERVAL '7 days'",
     )
     .fetch_one(pool)
     .await
@@ -225,7 +225,7 @@ async fn get_file_stats(pool: &SqlitePool) -> Result<FileStats, AppError> {
     })
 }
 
-async fn get_notification_stats(pool: &SqlitePool) -> Result<NotificationStats, AppError> {
+async fn get_notification_stats(pool: &PgPool) -> Result<NotificationStats, AppError> {
     // Total notifications
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications")
         .fetch_one(pool)
@@ -233,7 +233,7 @@ async fn get_notification_stats(pool: &SqlitePool) -> Result<NotificationStats, 
         .unwrap_or(0);
 
     // Unread notifications
-    let unread: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE read = 0")
+    let unread: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE is_read = FALSE")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
@@ -241,7 +241,7 @@ async fn get_notification_stats(pool: &SqlitePool) -> Result<NotificationStats, 
     Ok(NotificationStats { total, unread })
 }
 
-async fn get_activity_stats(pool: &SqlitePool) -> Result<ActivityStats, AppError> {
+async fn get_activity_stats(pool: &PgPool) -> Result<ActivityStats, AppError> {
     // Total activities
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM activities")
         .fetch_one(pool)
@@ -250,7 +250,7 @@ async fn get_activity_stats(pool: &SqlitePool) -> Result<ActivityStats, AppError
 
     // Today's activities
     let today: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM activities WHERE date(created_at) = date('now')",
+        "SELECT COUNT(*) FROM activities WHERE (created_at AT TIME ZONE 'UTC')::date = CURRENT_DATE",
     )
     .fetch_one(pool)
     .await
@@ -258,7 +258,7 @@ async fn get_activity_stats(pool: &SqlitePool) -> Result<ActivityStats, AppError
 
     // This week's activities
     let this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM activities WHERE created_at >= datetime('now', '-7 days')",
+        "SELECT COUNT(*) FROM activities WHERE created_at >= NOW() - INTERVAL '7 days'",
     )
     .fetch_one(pool)
     .await
@@ -355,19 +355,19 @@ pub async fn get_activity_feed(
     // Get activities with user information
     let activities = sqlx::query_as::<_, (String, String, String, Option<String>, String, String, Option<String>, Option<String>, String)>(
         "SELECT 
-            a.id,
-            a.user_id,
+            a.id::text,
+            a.user_id::text,
             u.full_name as user_name,
             u.avatar_url as user_avatar,
             a.action,
-            a.resource_type,
-            a.resource_id,
-            a.details,
-            a.created_at
+            a.entity_type,
+            a.entity_id,
+            a.description,
+            a.created_at::text
          FROM activities a
          JOIN users u ON a.user_id = u.id
          ORDER BY a.created_at DESC
-         LIMIT ? OFFSET ?"
+         LIMIT $1 OFFSET $2"
     )
     .bind(limit)
     .bind(offset)

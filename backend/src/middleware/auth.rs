@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::app_state::AppState;
 use crate::authz::permissions;
-use crate::authz::{load_effective_permissions, AuthContext};
+use crate::authz::{load_accessible_branch_ids, load_effective_permissions, AuthContext};
 use crate::models::User;
 use crate::utils::jwt;
 
@@ -36,21 +36,23 @@ pub async fn auth(
             tracing::warn!("Authorization header missing; allow anonymous dev principal");
             let user_id = Uuid::nil();
             let perms: BTreeSet<String> = BTreeSet::from([permissions::SYSTEM_SUPERUSER.to_string()]);
+            let branches: BTreeSet<String> = BTreeSet::new();
             let now = Utc::now();
             let user = User {
-                id: user_id.to_string(),
+                id: user_id,
                 email: "anonymous@local".to_string(),
                 password_hash: "".to_string(),
                 full_name: "Anonymous".to_string(),
                 role: "admin".to_string(),
                 avatar_url: None,
                 is_active: true,
+                status: "active".to_string(),
                 created_at: now,
                 updated_at: now,
             };
-            let ctx = AuthContext::new(user_id, perms);
+            let ctx = AuthContext::new(user_id, perms, branches);
             req.extensions_mut().insert(user_id);
-            req.extensions_mut().insert(user.id.clone());
+            req.extensions_mut().insert(user.id.to_string());
             req.extensions_mut().insert(user);
             req.extensions_mut().insert(ctx);
             return Ok(next.run(req).await);
@@ -75,8 +77,8 @@ pub async fn auth(
         StatusCode::UNAUTHORIZED
     })?;
 
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?1 AND is_active = 1")
-        .bind(&user_id_str)
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 AND is_active = TRUE")
+        .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| {
@@ -95,10 +97,17 @@ pub async fn auth(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let ctx = AuthContext::from_arc(user_id, perms);
+    let branches = load_accessible_branch_ids(pool, user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load branch scope: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let ctx = AuthContext::from_arcs(user_id, perms, branches);
 
     req.extensions_mut().insert(user_id);
-    req.extensions_mut().insert(user.id.clone());
+    req.extensions_mut().insert(user.id.to_string());
     req.extensions_mut().insert(user);
     req.extensions_mut().insert(ctx);
 

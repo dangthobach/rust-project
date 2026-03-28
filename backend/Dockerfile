@@ -5,7 +5,7 @@ FROM rust:1.79-slim as builder
 
 WORKDIR /app
 
-# Install dependencies for SQLite and SSL
+# Install dependencies for SSL (PostgreSQL via sqlx)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -54,7 +54,8 @@ RUN mkdir -p /app/data /app/uploads
 EXPOSE 3000 9090
 
 # Set environment variables
-ENV DATABASE_URL=sqlite:///app/data/crm.db \
+# Overridden by docker-compose (hostname `postgres`)
+ENV DATABASE_URL=postgresql://crm_app:crm_app@postgres:5432/crm \
     RUST_LOG=info \
     UPLOAD_DIR=/app/uploads
 

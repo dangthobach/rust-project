@@ -16,9 +16,8 @@ mod services;
 mod utils;
 mod workers;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::app_state::AppState;
@@ -42,15 +41,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting Neo-Brutalist CRM Backend Server...");
     tracing::info!("Environment loaded from .env");
 
-    // Create database connection pool (SQLite)
+    // Create database connection pool (PostgreSQL)
     tracing::info!("Connecting to database...");
-    let connect_options = SqliteConnectOptions::from_str(&config.database_url)?
-        .create_if_missing(true);
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(50) // Increased for 30k CCU
+    let pool = PgPoolOptions::new()
+        .max_connections(50)
         .acquire_timeout(std::time::Duration::from_secs(5))
-        .connect_with(connect_options)
+        .connect(&config.database_url)
         .await?;
 
     // Run migrations
@@ -76,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     // Perform health check
     tracing::info!("Running health checks...");
     match state.health_check().await {
-        Ok(_) => tracing::info!("✅ All systems healthy (Database + Redis)"),
+        Ok(_) => tracing::info!("✅ All systems healthy (core dependencies)"),
         Err(e) => {
             tracing::error!("❌ Health check failed: {}", e);
             tracing::error!("Please ensure:");
@@ -89,8 +85,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("✅ CQRS Infrastructure ready:");
     tracing::info!("  - Command Bus: Initialized");
     tracing::info!("  - Query Bus: Initialized");
-    tracing::info!("  - Event Store: SQLite-based");
-    tracing::info!("  - Event Bus: Redis Streams (neo_crm_events)");
+    tracing::info!("  - Event Store: PostgreSQL");
+    tracing::info!("  - Event Bus: Redis Streams or in-memory fallback (see AppState logs)");
 
     // ✅ Create router with CQRS support
     let app = create_router_with_state(state);

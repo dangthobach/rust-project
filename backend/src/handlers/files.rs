@@ -84,7 +84,7 @@ pub async fn list_files(
     // Scope filter
     if !unrestricted {
         bind_values.push(uid.clone());
-        where_sql.push_str(&format!(" AND uploaded_by = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND uploaded_by = ${}", bind_values.len()));
     }
 
     // Optional filters
@@ -99,7 +99,7 @@ pub async fn list_files(
         let pos = bind_values.len() - 1;
         // Support either exact match (application/pdf) or prefix (image/)
         where_sql.push_str(&format!(
-            " AND (file_type = ?{} OR file_type LIKE ?{})",
+            " AND (file_type = ${} OR file_type LIKE ${})",
             pos, pos + 1
         ));
     }
@@ -111,7 +111,7 @@ pub async fn list_files(
         .filter(|s| !s.is_empty())
     {
         bind_values.push(client_id.to_string());
-        where_sql.push_str(&format!(" AND client_id = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND client_id = ${}", bind_values.len()));
     }
 
     if let Some(task_id) = query
@@ -121,7 +121,7 @@ pub async fn list_files(
         .filter(|s| !s.is_empty())
     {
         bind_values.push(task_id.to_string());
-        where_sql.push_str(&format!(" AND task_id = ?{}", bind_values.len()));
+        where_sql.push_str(&format!(" AND task_id = ${}", bind_values.len()));
     }
 
     let count_sql = format!("SELECT COUNT(*) FROM files {}", where_sql);
@@ -136,8 +136,10 @@ pub async fn list_files(
     let offset = pagination.offset();
 
     let data_sql = format!(
-        "SELECT * FROM files {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        where_sql
+        "SELECT * FROM files {} ORDER BY created_at DESC LIMIT ${} OFFSET ${}",
+        where_sql,
+        bind_values.len() + 1,
+        bind_values.len() + 2
     );
     let mut data_query = sqlx::query_as::<_, File>(&data_sql);
     for v in bind_values {
@@ -163,11 +165,17 @@ pub async fn search_files(
     let search_term = sanitize_fts_query(&search_raw)?;
 
     let unrestricted = file_search_scope(&ctx)?;
-    let user_id = ctx.user_id.to_string();
     let scope_all: i64 = if unrestricted { 1 } else { 0 };
     let file_type = query.file_type.as_ref().map(|s| s.trim().to_string());
-    let client_id = query.client_id.as_ref().map(|s| s.trim().to_string());
-    let task_id = query.task_id.as_ref().map(|s| s.trim().to_string());
+    let client_id = query
+        .client_id
+        .as_ref()
+        .and_then(|s| Uuid::parse_str(s.trim()).ok());
+    let task_id = query
+        .task_id
+        .as_ref()
+        .and_then(|s| Uuid::parse_str(s.trim()).ok());
+    let user_uuid = ctx.user_id;
 
     let page = pagination.page;
     let limit = pagination.limit;
@@ -176,28 +184,27 @@ pub async fn search_files(
     let total: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*) FROM files f
-        INNER JOIN files_fts fts ON f.id = fts.id
-        WHERE files_fts MATCH ?1
-          AND (?2 = 1 OR f.uploaded_by = ?3)
-          AND (?4 IS NULL OR f.client_id = ?4)
-          AND (?5 IS NULL OR f.task_id = ?5)
+        WHERE f.search_vector @@ plainto_tsquery('simple', $1)
+          AND ($2 = 1 OR f.uploaded_by = $3)
+          AND ($4::uuid IS NULL OR f.client_id = $4)
+          AND ($5::uuid IS NULL OR f.task_id = $5)
           AND (
-            ?6 IS NULL
-            OR f.file_type = ?6
-            OR f.file_type LIKE (?6 || '%')
+            $6::text IS NULL
+            OR f.file_type = $6
+            OR f.file_type LIKE ($6 || '%')
           )
         "#,
     )
     .bind(&search_term)
     .bind(scope_all)
-    .bind(&user_id)
-    .bind(client_id.as_deref())
-    .bind(task_id.as_deref())
+    .bind(user_uuid)
+    .bind(client_id)
+    .bind(task_id)
     .bind(file_type.as_deref())
     .fetch_one(pool)
     .await
     .map_err(|e| {
-        tracing::warn!(error = %e, "FTS count failed");
+        tracing::warn!(error = %e, "file full-text count failed");
         AppError::BadRequest(
             "Search could not be executed; simplify the search term".to_string(),
         )
@@ -206,32 +213,32 @@ pub async fn search_files(
     let files = sqlx::query_as::<_, File>(
         r#"
         SELECT f.* FROM files f
-        INNER JOIN files_fts fts ON f.id = fts.id
-        WHERE files_fts MATCH ?1
-          AND (?2 = 1 OR f.uploaded_by = ?3)
-          AND (?4 IS NULL OR f.client_id = ?4)
-          AND (?5 IS NULL OR f.task_id = ?5)
+        WHERE f.search_vector @@ plainto_tsquery('simple', $1)
+          AND ($2 = 1 OR f.uploaded_by = $3)
+          AND ($4::uuid IS NULL OR f.client_id = $4)
+          AND ($5::uuid IS NULL OR f.task_id = $5)
           AND (
-            ?6 IS NULL
-            OR f.file_type = ?6
-            OR f.file_type LIKE (?6 || '%')
+            $6::text IS NULL
+            OR f.file_type = $6
+            OR f.file_type LIKE ($6 || '%')
           )
-        ORDER BY rank, f.created_at DESC
-        LIMIT ?7 OFFSET ?8
+        ORDER BY ts_rank_cd(f.search_vector, plainto_tsquery('simple', $1)) DESC NULLS LAST,
+                 f.created_at DESC
+        LIMIT $7 OFFSET $8
         "#,
     )
     .bind(&search_term)
     .bind(scope_all)
-    .bind(&user_id)
-    .bind(client_id.as_deref())
-    .bind(task_id.as_deref())
+    .bind(user_uuid)
+    .bind(client_id)
+    .bind(task_id)
     .bind(file_type.as_deref())
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
     .await
     .map_err(|e| {
-        tracing::warn!(error = %e, "FTS search failed");
+        tracing::warn!(error = %e, "file full-text search failed");
         AppError::BadRequest(
             "Search could not be executed; simplify the search term".to_string(),
         )
@@ -349,7 +356,7 @@ pub async fn upload_file(
 
     let file_record = sqlx::query_as::<_, File>(
         r#"INSERT INTO files (id, name, original_name, file_path, file_type, file_size, uploaded_by, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *"#,
     )
     .bind(&file_id)
@@ -358,7 +365,7 @@ pub async fn upload_file(
     .bind(&file_path)
     .bind(&file_type)
     .bind(file_size)
-    .bind(ctx.user_id.to_string())
+    .bind(ctx.user_id)
     .fetch_one(pool)
     .await;
 
@@ -385,7 +392,7 @@ pub async fn upload_file(
             });
             let _ = state
                 .kafka_publisher
-                .publish("crm.domain.file", &rec.id, &domain_event.to_string())
+                .publish("crm.domain.file", &rec.id.to_string(), &domain_event.to_string())
                 .await;
 
             tracing::info!(
@@ -409,7 +416,7 @@ pub async fn get_file(
 ) -> AppResult<Json<File>> {
     let pool = state.pool();
     let id = parse_file_id(&id)?;
-    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?;
@@ -432,7 +439,7 @@ pub async fn download_file(
 ) -> AppResult<Response> {
     let pool = state.pool();
     let id = parse_file_id(&id)?;
-    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?;
@@ -496,7 +503,7 @@ pub async fn get_download_url(
 ) -> AppResult<Json<serde_json::Value>> {
     let pool = state.pool();
     let id = parse_file_id(&id)?;
-    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?;
@@ -533,7 +540,7 @@ pub async fn get_thumbnail_url(
 ) -> AppResult<Json<serde_json::Value>> {
     let pool = state.pool();
     let id = parse_file_id(&id)?;
-    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?;
@@ -575,7 +582,7 @@ pub async fn delete_file(
 ) -> AppResult<Json<serde_json::Value>> {
     let pool = state.pool();
     let id = parse_file_id(&id)?;
-    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?1")
+    let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
         .bind(&id)
         .fetch_optional(pool)
         .await?;
@@ -588,7 +595,7 @@ pub async fn delete_file(
         return Err(AppError::NotFound("File not found".to_string()));
     }
 
-    sqlx::query("DELETE FROM files WHERE id = ?1")
+    sqlx::query("DELETE FROM files WHERE id = $1")
         .bind(&id)
         .execute(pool)
         .await?;

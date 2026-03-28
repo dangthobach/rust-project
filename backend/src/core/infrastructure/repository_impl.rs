@@ -1,7 +1,7 @@
 // This file is kept for future type-specific repository implementations
 // Currently using generic PostgresRepository with Rebuildable trait
 
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::core::events::{PostgresEventStore, event_store::EventStore};
@@ -11,12 +11,12 @@ use crate::domains::file_system::events::FileSystemEvent;
 
 /// File-specific repository implementation
 pub struct FileRepository {
-    pool: SqlitePool,
+    pool: PgPool,
     event_store: PostgresEventStore,
 }
 
 impl FileRepository {
-    pub fn new(pool: SqlitePool, event_store: PostgresEventStore) -> Self {
+    pub fn new(pool: PgPool, event_store: PostgresEventStore) -> Self {
         Self { pool, event_store }
     }
 
@@ -36,12 +36,12 @@ impl FileRepository {
 
 /// Folder-specific repository implementation
 pub struct FolderRepository {
-    pool: SqlitePool,
+    pool: PgPool,
     event_store: PostgresEventStore,
 }
 
 impl FolderRepository {
-    pub fn new(pool: SqlitePool, event_store: PostgresEventStore) -> Self {
+    pub fn new(pool: PgPool, event_store: PostgresEventStore) -> Self {
         Self { pool, event_store }
     }
 

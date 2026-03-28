@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 use crate::core::events::{EventBus, PostgresEventStore};
@@ -11,7 +11,7 @@ use crate::domains::file_system::services::FileSystemService;
 /// Used in API routes for dependency injection
 #[derive(Clone)]
 pub struct HandlerState {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
     pub file_repo: Arc<PostgresRepository<File>>,
     pub folder_repo: Arc<PostgresRepository<Folder>>,
     pub event_bus: Arc<dyn EventBus + Send + Sync>,
@@ -20,7 +20,7 @@ pub struct HandlerState {
 
 impl HandlerState {
     pub fn new(
-        pool: SqlitePool,
+        pool: PgPool,
         event_bus: Arc<dyn EventBus + Send + Sync>,
     ) -> Self {
         let event_store = PostgresEventStore::new(pool.clone());

@@ -4,11 +4,14 @@ use axum::{
     routing::{delete, get, patch, post},
     Router,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::api::{cqrs_handlers as cqrs, file_system_cqrs as fs_cqrs, rbac_cqrs, tasks_cqrs, users_cqrs};
+use crate::api::{
+    authorization, branch_cqrs, cqrs_handlers as cqrs, file_system_cqrs as fs_cqrs, rbac_cqrs,
+    tasks_cqrs, users_cqrs,
+};
 use crate::app_state::AppState;
 use crate::config::Config;
 use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, tasks, users, websocket};
@@ -78,7 +81,6 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/clients/:id", patch(cqrs::update_client))
         .route("/api/clients/:id", delete(cqrs::delete_client))
         .route("/api/tasks/:id", delete(tasks_cqrs::delete_task))
-        .route("/api/files/:id", delete(files::delete_file))
         .route_layer(middleware::from_fn(rbac::require_manager_or_admin));
 
     // Admin only routes
@@ -121,6 +123,25 @@ pub fn create_router_with_state(state: AppState) -> Router {
             "/api/admin/rbac/users/:user_id/roles/:role_id",
             delete(rbac_cqrs::revoke_role_from_user),
         )
+        // Branches + resource grants (admin)
+        .route("/api/admin/branches", get(branch_cqrs::list_branches))
+        .route("/api/admin/branches", post(branch_cqrs::create_branch))
+        .route(
+            "/api/admin/users/:user_id/branches/:branch_id",
+            post(branch_cqrs::assign_user_branch),
+        )
+        .route(
+            "/api/admin/users/:user_id/branches/:branch_id",
+            delete(branch_cqrs::revoke_user_branch),
+        )
+        .route(
+            "/api/admin/grants",
+            post(branch_cqrs::grant_resource_access),
+        )
+        .route(
+            "/api/admin/grants/:user_id/:kind/:resource_id",
+            delete(branch_cqrs::revoke_resource_access),
+        )
         // Export routes (Admin only)
         .route("/api/export/users", get(export::export_users))
         .route("/api/export/dashboard-report", get(export::export_dashboard_report))
@@ -131,6 +152,10 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .merge(logout_routes)
         // User routes (all authenticated users)
         .route("/api/users/me", get(users_cqrs::get_current_user))
+        .route(
+            "/api/users/me/authorization",
+            get(authorization::me_authorization),
+        )
         .route("/api/users/profile", get(users::get_user_profile))
         .route("/api/users/:id", get(users_cqrs::get_user))
         .route("/api/users/:id", patch(users_cqrs::update_user_self))
@@ -213,7 +238,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
 ///
 /// Deprecated: Use create_router_with_state() instead.
 #[deprecated(since = "1.0.0", note = "Use create_router_with_state instead")]
-pub fn create_router(pool: SqlitePool, config: Config) -> Router {
+pub fn create_router(pool: PgPool, config: Config) -> Router {
     // Create AppState from pool and config for backward compatibility
     let runtime = tokio::runtime::Handle::current();
     let state = runtime.block_on(async {

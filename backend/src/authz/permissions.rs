@@ -13,3 +13,7 @@ pub const FILES_DOWNLOAD_ALL: &str = "files.download.all";
 pub const FILES_UPLOAD: &str = "files.upload";
 pub const FILES_DELETE_OWN: &str = "files.delete.own";
 pub const FILES_DELETE_ANY: &str = "files.delete.any";
+
+pub const BRANCH_DATA_ALL: &str = "branch.data.all";
+pub const BRANCH_MANAGE: &str = "branch.manage";
+pub const RESOURCE_GRANT_MANAGE: &str = "resource.grant.manage";

@@ -9,12 +9,7 @@ use crate::models::File;
 
 #[inline]
 fn owner_id_matches(file: &File, user_id: &Uuid) -> bool {
-    let Some(ub) = file.uploaded_by.as_deref() else {
-        return false;
-    };
-    Uuid::parse_str(ub)
-        .map(|parsed| parsed == *user_id)
-        .unwrap_or(false)
+    file.uploaded_by.map(|ub| ub == *user_id).unwrap_or(false)
 }
 
 /// `true` = no `uploaded_by` filter; `false` = restrict to current user.

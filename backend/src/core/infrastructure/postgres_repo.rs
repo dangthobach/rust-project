@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::core::domain::{AggregateRoot, Repository};
@@ -9,7 +9,7 @@ use crate::core::events::event_store::EventStore;
 /// Sử dụng Event Sourcing để persist aggregates
 #[derive(Clone)]
 pub struct PostgresRepository<T: AggregateRoot> {
-    pool: SqlitePool,
+    pool: PgPool,
     event_store: crate::core::events::PostgresEventStore,
     aggregate_type: String,
     _phantom: std::marker::PhantomData<T>,
@@ -17,7 +17,7 @@ pub struct PostgresRepository<T: AggregateRoot> {
 
 impl<T: AggregateRoot> PostgresRepository<T> {
     pub fn new(
-        pool: SqlitePool,
+        pool: PgPool,
         event_store: crate::core::events::PostgresEventStore,
         aggregate_type: String,
     ) -> Self {

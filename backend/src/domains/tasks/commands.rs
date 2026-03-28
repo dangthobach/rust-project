@@ -1,24 +1,26 @@
+use crate::authz::data_scope::DataScope;
 use crate::core::cqrs::Command;
 use crate::models::Task;
-use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 /// Create Task Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct CreateTaskCommand {
     #[validate(length(min = 1, max = 255))]
     pub title: String,
-    
+
     pub description: Option<String>,
-    
+
     pub status: Option<String>,
-    
+
     pub priority: Option<String>,
     pub assigned_to: Option<String>,
     pub client_id: Option<String>,
     pub due_date: Option<String>,
     pub created_by: Option<String>,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for CreateTaskCommand {
@@ -30,14 +32,14 @@ impl Command for CreateTaskCommand {
 }
 
 /// Update Task Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct UpdateTaskCommand {
     #[validate(length(min = 1))]
     pub id: String,
-    
+
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
-    
+
     pub description: Option<String>,
     pub status: Option<String>,
     pub priority: Option<String>,
@@ -45,6 +47,8 @@ pub struct UpdateTaskCommand {
     pub client_id: Option<String>,
     pub due_date: Option<String>,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for UpdateTaskCommand {
@@ -56,11 +60,13 @@ impl Command for UpdateTaskCommand {
 }
 
 /// Delete Task Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct DeleteTaskCommand {
     #[validate(length(min = 1))]
     pub id: String,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for DeleteTaskCommand {
@@ -72,11 +78,13 @@ impl Command for DeleteTaskCommand {
 }
 
 /// Complete Task Command
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct CompleteTaskCommand {
     #[validate(length(min = 1))]
     pub id: String,
     pub actor_id: Option<String>,
+    pub data_scope: DataScope,
+    pub actor_user_id: String,
 }
 
 impl Command for CompleteTaskCommand {
