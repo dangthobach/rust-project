@@ -1,6 +1,8 @@
 # Rust
 target/
 Cargo.lock
+# Binary crate: lockfile is required for reproducible `docker compose build` (backend/Dockerfile)
+!backend/Cargo.lock
 **/*.rs.bk
 *.pdb
 

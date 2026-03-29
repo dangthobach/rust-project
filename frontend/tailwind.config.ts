@@ -5,32 +5,43 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Neo-Brutalist Color Palette
+        // Industrial Ledger — Neo-Brutalism
         primary: {
-          DEFAULT: '#00FF00', // Neon Green
-          dark: '#00CC00',
+          DEFAULT: '#A3FF00', // Neon lime (CTA)
+          dark: '#7ACC00',
         },
         secondary: {
-          DEFAULT: '#0080FF', // Electric Blue
+          DEFAULT: '#0080FF',
           dark: '#0066CC',
         },
+        ledger: {
+          cream: '#F5F5F0',
+          lime: '#A3FF00',
+          orange: '#FF5C00',
+          sky: '#A0C4FF',
+          pale: '#FDFFB6',
+          mint: '#C1FFD7',
+        },
         accent: {
-          yellow: '#FFFF00',
+          yellow: '#FDFFB6',
           pink: '#FF10F0',
-          orange: '#FF6B00',
+          orange: '#FF5C00',
         },
         neutral: {
           beige: '#E8E3D6',
           concrete: '#C0B5A4',
           gray: '#8B8680',
+          lightGray: '#E8E8E4',
+          darkGray: '#3D3D3D',
+          black: '#000000',
         },
-        background: '#E8E3D6',
-        surface: '#C0B5A4',
+        background: '#F5F5F0',
+        surface: '#FFFFFF',
         border: '#000000',
       },
       fontFamily: {
-        heading: ['Space Grotesk', 'DM Sans', 'system-ui', 'sans-serif'],
-        body: ['Inter', 'Work Sans', 'system-ui', 'sans-serif'],
+        heading: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+        body: ['Lexend', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
       },
       fontSize: {
@@ -42,12 +53,12 @@ export default {
         body: ['1rem', { lineHeight: '1.6', fontWeight: '400' }],
       },
       boxShadow: {
-        brutal: '8px 8px 0px 0px #000000',
+        brutal: '6px 6px 0px 0px #000000',
         'brutal-sm': '4px 4px 0px 0px #000000',
-        'brutal-lg': '12px 12px 0px 0px #000000',
-        'brutal-xl': '16px 16px 0px 0px #000000',
-        'brutal-primary': '8px 8px 0px 0px #00FF00',
-        'brutal-secondary': '8px 8px 0px 0px #0080FF',
+        'brutal-lg': '8px 8px 0px 0px #000000',
+        'brutal-xl': '12px 12px 0px 0px #000000',
+        'brutal-primary': '6px 6px 0px 0px #A3FF00',
+        'brutal-secondary': '6px 6px 0px 0px #0080FF',
       },
       borderWidth: {
         '3': '3px',

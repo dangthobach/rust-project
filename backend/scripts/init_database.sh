@@ -3,7 +3,8 @@
 #
 # Prerequisites:
 #   - sqlx-cli: cargo install sqlx-cli --version 0.7.4 --no-default-features --features postgres,rustls
-#   - Database must exist; role must own DB or have rights to create tables.
+#   - Database must exist. Default URL uses crm_app: that user needs USAGE+CREATE on schema public
+#     (see scripts/db/postgres/01_create_database_and_roles.sql). Alternatively run migrate as crm_admin.
 #
 # Usage:
 #   cd backend && chmod +x scripts/init_database.sh && ./scripts/init_database.sh
@@ -19,7 +20,8 @@ if [[ -f "$BACKEND_ROOT/.env" ]]; then
   if [[ -n "$line" ]]; then
     export DATABASE_URL="${line#*=}"
     DATABASE_URL="${DATABASE_URL%\"}"
-    DATABASE_URL="${DATABASE_URL#\"}"
+    DATABASE_URL="${DATABASE_URL#\"}"tich
+    
     DATABASE_URL="${DATABASE_URL%\'}"
     DATABASE_URL="${DATABASE_URL#\'}"
   fi

@@ -19,3 +19,8 @@ CREATE ROLE crm_app WITH LOGIN PASSWORD 'CHANGE_ME_CRM_APP' NOSUPERUSER NOCREATE
 CREATE DATABASE crm OWNER crm_admin ENCODING 'UTF8' TEMPLATE template0;
 
 GRANT CONNECT ON DATABASE crm TO crm_app;
+
+-- PostgreSQL 15+: schema public no longer grants CREATE to everyone. sqlx migrate with
+-- DATABASE_URL=...crm_app... needs USAGE + CREATE on public (or run migrate as crm_admin).
+\c crm
+GRANT USAGE, CREATE ON SCHEMA public TO crm_app;

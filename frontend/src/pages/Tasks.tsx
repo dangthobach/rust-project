@@ -1,11 +1,38 @@
-import { Component, createSignal, For, Show, createMemo } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Spinner } from '~/components/ui';
-import { TaskCard } from '~/components/crm';
+import { Component, createSignal, For, Show, createMemo, type Accessor } from 'solid-js';
+import { A, useNavigate } from '@solidjs/router';
+import { Card, Button, Badge, Input, Spinner } from '~/components/ui';
+import { TaskCard, type TaskTagTone } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
 import { useTasks, useUpdateTask, useDeleteTask, useCompleteTask, useTaskStats, useCurrentUser } from '~/lib/hooks';
 import { api } from '~/lib/api';
 import { showToast } from '~/lib/toast';
+
+function formatTaskDue(d: string | null | undefined): string {
+  if (!d) return 'No due date';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return d;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
+}
+
+function rowIndex(i: Accessor<number> | number | undefined): number {
+  if (i === undefined) return 0;
+  return typeof i === 'function' ? i() : i;
+}
+
+function tagsForRow(index: number): Array<{ label: string; tone: TaskTagTone }> {
+  const pools: Array<Array<{ label: string; tone: TaskTagTone }>> = [
+    [
+      { label: 'Development', tone: 'sky' },
+      { label: 'V2.0', tone: 'lime' },
+    ],
+    [{ label: 'Design', tone: 'pale' }],
+    [
+      { label: 'Ops', tone: 'mint' },
+      { label: 'V2.0', tone: 'lime' },
+    ],
+  ];
+  return pools[index % pools.length];
+}
 
 const Tasks: Component = () => {
   const navigate = useNavigate();
@@ -21,7 +48,6 @@ const Tasks: Component = () => {
 
   const me = useCurrentUser();
 
-  // API hooks
   const tasks = useTasks(() => ({
     page: page(),
     limit: viewMode() === 'kanban' ? 200 : 12,
@@ -46,7 +72,7 @@ const Tasks: Component = () => {
       const blob = await api.exportTasks(format, {
         status: status() || undefined,
       });
-      
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -55,27 +81,34 @@ const Tasks: Component = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       showToast('success', 'Export Successful', `Tasks exported as ${format.toUpperCase()}`);
-    } catch (error) {
+    } catch (_error) {
       showToast('error', 'Export Failed', 'Failed to export tasks');
     } finally {
       setIsExporting(false);
     }
   };
 
-  // Quick stats from API
-  const stats = createMemo(() => taskStats.data || {
-    total: 0,
-    completed: 0,
-    pending: 0,
-    inProgress: 0,
-    overdue: 0,
-    dueToday: 0,
-    byPriority: { high: 0, medium: 0, low: 0 }
+  const stats = createMemo(
+    () =>
+      taskStats.data || {
+        total: 0,
+        completed: 0,
+        pending: 0,
+        inProgress: 0,
+        overdue: 0,
+        dueToday: 0,
+        byPriority: { high: 0, medium: 0, low: 0 },
+      },
+  );
+
+  const displayName = createMemo(() => {
+    const u = me.data as { full_name?: string; username?: string; email?: string } | undefined;
+    return u?.full_name || u?.username || u?.email || 'Alex Rivera';
   });
 
-  const handleUpdateTask = (taskId: string, updates: any) => {
+  const handleUpdateTask = (taskId: string, updates: Record<string, unknown>) => {
     updateTask.mutate({ id: taskId, updates });
   };
 
@@ -139,8 +172,9 @@ const Tasks: Component = () => {
       clearSelection();
       await tasks.refetch();
       await taskStats.refetch();
-    } catch (e: any) {
-      showToast('error', 'Bulk action failed', e?.message || 'Please try again');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Please try again';
+      showToast('error', 'Bulk action failed', msg);
     }
   };
 
@@ -148,7 +182,7 @@ const Tasks: Component = () => {
     try {
       ev.dataTransfer?.setData('text/plain', id);
       ev.dataTransfer?.setData('application/x-task-id', id);
-      ev.dataTransfer!.effectAllowed = 'move';
+      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
     } catch {
       // ignore
     }
@@ -163,208 +197,218 @@ const Tasks: Component = () => {
 
   const tasksByStatus = createMemo(() => {
     const rows = tasks.data?.data || [];
-    const map: Record<string, any[]> = { todo: [], in_progress: [], done: [], cancelled: [] };
+    const map: Record<string, unknown[]> = { todo: [], in_progress: [], done: [], cancelled: [] };
     for (const t of rows) {
-      (map[t.status] ??= []).push(t);
+      (map[(t as { status: string }).status] ??= []).push(t);
     }
-    return map;
+    return map as Record<string, any[]>;
   });
 
+  const statusBtn = (active: boolean) =>
+    [
+      'border-3 border-black px-3 py-2 font-heading text-xs font-black uppercase tracking-wide shadow-brutal-sm transition-all',
+      active ? 'bg-black text-white -translate-x-0.5 -translate-y-0.5' : 'bg-white text-black hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-ledger-pale',
+    ].join(' ');
+
   return (
-    <div>
-      {/* Header */}
-      <div class="flex items-center justify-between mb-8">
-        <div>
-          <h1 class="text-heading-1 font-heading font-black uppercase text-shadow-brutal">
-            Task Management
-          </h1>
-          <p class="text-neutral-darkGray text-lg">
-            Organize and track all your tasks efficiently
-          </p>
-        </div>
-        
-        <div class="flex gap-3">
-          <ExportButton 
-            onExport={handleExport}
-            isExporting={isExporting()}
-            label="Export"
+    <div class="font-body">
+      {/* Page header — Task Management */}
+      <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+        <h1 class="shrink-0 font-heading text-2xl font-black uppercase tracking-tight text-black sm:text-3xl">
+          Task Management
+        </h1>
+
+        <div class="relative min-w-0 flex-1">
+          <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-lg" aria-hidden="true">
+            🔍
+          </span>
+          <Input
+            type="text"
+            placeholder="Search tasks..."
+            value={search()}
+            onInput={(e) => handleSearch(e.currentTarget.value)}
+            class="!pl-10 font-body"
           />
+        </div>
+
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-3">
+          <A
+            href="/notifications"
+            class="relative inline-flex h-11 w-11 items-center justify-center border-3 border-black bg-white text-xl shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
+            aria-label="Notifications"
+          >
+            🔔
+            <span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-black" />
+          </A>
+          <A
+            href="/profile"
+            class="inline-flex h-11 w-11 items-center justify-center border-3 border-black bg-white text-xl shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
+            aria-label="Settings"
+          >
+            ⚙️
+          </A>
+          <div class="hidden h-8 w-[3px] bg-black sm:block" />
+          <div class="flex items-center gap-3 border-3 border-black bg-white px-3 py-2 shadow-brutal-sm">
+            <div class="hidden text-right sm:block">
+              <div class="font-heading text-xs font-black uppercase leading-tight text-black">
+                {displayName()}
+              </div>
+              <div class="font-heading text-[10px] font-bold uppercase text-neutral-darkGray">Admin access</div>
+            </div>
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-black bg-ledger-pale font-heading text-xs font-black shadow-brutal-sm"
+              aria-hidden="true"
+            >
+              AR
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stat cards — compact neon accents */}
+      <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="border-3 border-black bg-white p-3 shadow-brutal-sm">
+          <div class="mb-1 flex items-center justify-between text-ledger-sky">
+            <span class="text-xl" aria-hidden="true">
+              📊
+            </span>
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{stats().total}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-neutral-darkGray">Total tasks</div>
+        </div>
+        <div class="border-3 border-black bg-ledger-lime p-3 shadow-brutal-sm">
+          <div class="mb-1 text-xl" aria-hidden="true">
+            ✓
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{stats().completed}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Completed</div>
+        </div>
+        <div class="border-3 border-black bg-ledger-sky p-3 shadow-brutal-sm">
+          <div class="mb-1 text-xl" aria-hidden="true">
+            💼
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{stats().pending}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Pending</div>
+        </div>
+        <div class="border-3 border-black bg-ledger-mint p-3 shadow-brutal-sm">
+          <div class="mb-1 text-xl" aria-hidden="true">
+            ↻
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{stats().inProgress}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">In progress</div>
+        </div>
+        <div class="border-3 border-black bg-ledger-orange p-3 text-white shadow-brutal-sm">
+          <div class="mb-1 text-xl" aria-hidden="true">
+            !
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{String(stats().overdue).padStart(2, '0')}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-white/90">Overdue</div>
+        </div>
+        <div class="border-3 border-black bg-ledger-pale p-3 shadow-brutal-sm">
+          <div class="mb-1 text-xl" aria-hidden="true">
+            📅
+          </div>
+          <div class="font-heading text-2xl font-black tabular-nums">{String(stats().dueToday).padStart(2, '0')}</div>
+          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Due today</div>
+        </div>
+      </div>
+
+      {/* Toolbar: status + priority + CTA */}
+      <div class="mb-4 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" class={statusBtn(status() === '')} onClick={() => handleFilterChange('status', '')}>
+            All status
+          </button>
+          <button type="button" class={statusBtn(status() === 'todo')} onClick={() => handleFilterChange('status', 'todo')}>
+            Todo
+          </button>
+          <button
+            type="button"
+            class={statusBtn(status() === 'in_progress')}
+            onClick={() => handleFilterChange('status', 'in_progress')}
+          >
+            In progress
+          </button>
+          <button type="button" class={statusBtn(status() === 'done')} onClick={() => handleFilterChange('status', 'done')}>
+            Done
+          </button>
+          <button
+            type="button"
+            class={statusBtn(status() === 'cancelled')}
+            onClick={() => handleFilterChange('status', 'cancelled')}
+          >
+            Cancelled
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-2 font-heading text-xs font-black uppercase">
+            <span class="hidden sm:inline">Priority</span>
+            <select
+              class="select max-w-[200px] border-3 border-black bg-white py-2 font-heading text-xs font-bold uppercase shadow-brutal-sm"
+              value={priority()}
+              onChange={(e) => handleFilterChange('priority', e.currentTarget.value)}
+            >
+              <option value="">All</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </label>
+
+          <div class="flex gap-1 border-3 border-black bg-white p-1 shadow-brutal-sm">
+            <button
+              type="button"
+              class={viewMode() === 'grid' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
+              onClick={() => setViewMode('grid')}
+            >
+              Grid
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'list' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
+              onClick={() => setViewMode('list')}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'kanban' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
+              onClick={() => setViewMode('kanban')}
+            >
+              Kanban
+            </button>
+          </div>
+
+          <ExportButton onExport={handleExport} isExporting={isExporting()} label="Export" />
+
           <Button
             variant="secondary"
-            size="md"
+            size="sm"
             onClick={() => {
               setMyOnly((v) => !v);
               setPage(1);
             }}
           >
-            📋 {myOnly() ? 'All Tasks' : 'My Tasks'}
+            {myOnly() ? 'All tasks' : 'My tasks'}
           </Button>
-          <Button 
-            variant="primary" 
-            size="lg"
+
+          <button
+            type="button"
+            class="border-3 border-black bg-ledger-lime px-4 py-2 font-heading text-xs font-black uppercase shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
             onClick={() => navigate('/tasks/new')}
           >
-            ➕ New Task
-          </Button>
+            + New task
+          </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
-        <Card class="text-center p-4">
-          <div class="text-2xl font-heading font-black">{stats().total}</div>
-          <div class="text-xs font-bold uppercase text-neutral-darkGray">Total</div>
-        </Card>
-        <Card class="text-center p-4 bg-green-100 border-green-500">
-          <div class="text-2xl font-heading font-black text-green-700">{stats().completed}</div>
-          <div class="text-xs font-bold uppercase text-green-600">Completed</div>
-        </Card>
-        <Card class="text-center p-4 bg-yellow-100 border-yellow-500">
-          <div class="text-2xl font-heading font-black text-yellow-700">{stats().pending}</div>
-          <div class="text-xs font-bold uppercase text-yellow-600">Pending</div>
-        </Card>
-        <Card class="text-center p-4 bg-blue-100 border-blue-500">
-          <div class="text-2xl font-heading font-black text-blue-700">{stats().inProgress}</div>
-          <div class="text-xs font-bold uppercase text-blue-600">In Progress</div>
-        </Card>
-        <Card class="text-center p-4 bg-red-100 border-red-500">
-          <div class="text-2xl font-heading font-black text-red-700">{stats().overdue}</div>
-          <div class="text-xs font-bold uppercase text-red-600">Overdue</div>
-        </Card>
-        <Card class="text-center p-4 bg-purple-100 border-purple-500">
-          <div class="text-2xl font-heading font-black text-purple-700">{stats().dueToday}</div>
-          <div class="text-xs font-bold uppercase text-purple-600">Due Today</div>
-        </Card>
-      </div>
-
-      {/* Filters and View Controls */}
-      <div class="flex flex-col lg:flex-row gap-4 mb-6">
-        {/* Search */}
-        <div class="flex-1">
-          <Input
-            type="text"
-            placeholder="Search tasks..."
-            value={search()}
-            onInput={(e: any) => handleSearch(e.currentTarget.value)}
-          />
-        </div>
-        
-        {/* Status Filter */}
-        <div class="flex gap-2">
-          <Button
-            variant={status() === '' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('status', '')}
-          >
-            All Status
-          </Button>
-          <Button
-            variant={status() === 'todo' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('status', 'todo')}
-          >
-            Todo
-          </Button>
-          <Button
-            variant={status() === 'in_progress' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('status', 'in_progress')}
-          >
-            In Progress
-          </Button>
-          <Button
-            variant={status() === 'done' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('status', 'done')}
-          >
-            Done
-          </Button>
-          <Button
-            variant={status() === 'cancelled' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('status', 'cancelled')}
-          >
-            Cancelled
-          </Button>
-        </div>
-
-        {/* Priority Filter */}
-        <div class="flex gap-2">
-          <Button
-            variant={priority() === '' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('priority', '')}
-          >
-            All Priority
-          </Button>
-          <Button
-            variant={priority() === 'high' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('priority', 'high')}
-          >
-            🔴 High
-          </Button>
-          <Button
-            variant={priority() === 'medium' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('priority', 'medium')}
-          >
-            🟡 Medium
-          </Button>
-          <Button
-            variant={priority() === 'low' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('priority', 'low')}
-          >
-            🟢 Low
-          </Button>
-          <Button
-            variant={priority() === 'urgent' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => handleFilterChange('priority', 'urgent')}
-          >
-            🔥 Urgent
-          </Button>
-        </div>
-
-        {/* View Mode & Reset */}
-        <div class="flex gap-2">
-          <Button
-            variant={viewMode() === 'grid' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setViewMode('grid')}
-          >
-            📊 Grid
-          </Button>
-          <Button
-            variant={viewMode() === 'list' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setViewMode('list')}
-          >
-            📋 List
-          </Button>
-          <Button
-            variant={viewMode() === 'kanban' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setViewMode('kanban')}
-          >
-            Kanban
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={resetFilters}
-          >
-            🔄 Reset
-          </Button>
-        </div>
-      </div>
-
-      {/* Due filters */}
-      <div class="flex flex-wrap gap-2 mb-6">
-        <Button
-          variant={dueTodayOnly() ? 'primary' : 'secondary'}
-          size="sm"
+      {/* Due filters + reset */}
+      <div class="mb-6 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          class={statusBtn(dueTodayOnly())}
           onClick={() => {
             setDueTodayOnly((v) => !v);
             if (!dueTodayOnly()) setOverdueOnly(false);
@@ -372,10 +416,10 @@ const Tasks: Component = () => {
           }}
         >
           Due today
-        </Button>
-        <Button
-          variant={overdueOnly() ? 'primary' : 'secondary'}
-          size="sm"
+        </button>
+        <button
+          type="button"
+          class={statusBtn(overdueOnly())}
           onClick={() => {
             setOverdueOnly((v) => !v);
             if (!overdueOnly()) setDueTodayOnly(false);
@@ -383,16 +427,16 @@ const Tasks: Component = () => {
           }}
         >
           Overdue
-        </Button>
+        </button>
+        <button type="button" class={statusBtn(false)} onClick={resetFilters}>
+          Reset filters
+        </button>
       </div>
 
-      {/* Bulk actions */}
       <Show when={selectedIds().size > 0}>
-        <Card class="p-4 mb-6">
+        <Card class="mb-6 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="font-bold">
-              Selected: {selectedIds().size}
-            </div>
+            <div class="font-heading font-bold uppercase">Selected: {selectedIds().size}</div>
             <div class="flex flex-wrap gap-2">
               <Button variant="primary" size="sm" onClick={() => bulkAction('complete')}>
                 Complete
@@ -400,7 +444,7 @@ const Tasks: Component = () => {
               <Button variant="secondary" size="sm" onClick={() => bulkAction('cancel')}>
                 Cancel
               </Button>
-              <Button variant="secondary" size="sm" class="bg-red-500 hover:bg-red-600" onClick={() => bulkAction('delete')}>
+              <Button variant="secondary" size="sm" class="!bg-red-500 hover:!bg-red-600" onClick={() => bulkAction('delete')}>
                 Delete
               </Button>
               <Button variant="secondary" size="sm" onClick={clearSelection}>
@@ -411,24 +455,16 @@ const Tasks: Component = () => {
         </Card>
       </Show>
 
-      {/* Task List */}
       <Show when={tasks.isPending}>
-        <div class="flex justify-center p-8">
+        <div class="flex justify-center p-12">
           <Spinner />
         </div>
       </Show>
 
       <Show when={tasks.isError}>
-        <Card class="p-6 bg-red-100 border-red-500">
-          <p class="text-red-700 font-bold">
-            Error loading tasks: {tasks.error?.message}
-          </p>
-          <Button 
-            variant="secondary" 
-            size="sm" 
-            class="mt-4"
-            onClick={() => tasks.refetch()}
-          >
+        <Card class="border-3 border-red-500 bg-red-50 p-6">
+          <p class="font-heading font-bold text-red-700">Error loading tasks: {tasks.error?.message}</p>
+          <Button variant="secondary" size="sm" class="mt-4" onClick={() => tasks.refetch()}>
             Retry
           </Button>
         </Card>
@@ -436,16 +472,19 @@ const Tasks: Component = () => {
 
       <Show when={tasks.data}>
         <Show when={viewMode() !== 'kanban'}>
-          <div class={`grid gap-6 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+          <div
+            class={`grid gap-6 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' : 'grid-cols-1'}`}
+          >
             <For each={tasks.data?.data || []}>
-              {(task: any) => (
+              {(task: any, i) => (
                 <div class="relative group">
-                  <div class="absolute top-2 left-2 z-10">
+                  <div class="absolute left-3 top-3 z-20">
                     <input
                       type="checkbox"
+                      class="checkbox h-5 w-5"
                       checked={selectedIds().has(task.id)}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                      onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
                     />
                   </div>
 
@@ -453,105 +492,115 @@ const Tasks: Component = () => {
                     title={task.title}
                     description={task.description || ''}
                     priority={task.priority}
-                    dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                    dueDate={formatTaskDue(task.due_date)}
                     status={task.status}
+                    tags={tagsForRow(rowIndex(i))}
                     onClick={() => navigate(`/tasks/${task.id}`)}
                   />
-                  
-                  {/* Quick Action Buttons */}
-                  <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+
+                  <div class="absolute right-3 top-12 z-20 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                     <Show when={task.status !== 'done'}>
                       <Button
                         variant="primary"
                         size="sm"
-                        class="bg-green-500 hover:bg-green-600"
-                        onClick={() => completeTask.mutate(task.id)}
+                        class="!min-w-0 !px-2 !bg-green-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          completeTask.mutate(task.id);
+                        }}
                         title="Mark as completed"
                       >
-                        ✅
+                        ✓
                       </Button>
                     </Show>
-                    
+
                     <Show when={task.status !== 'in_progress'}>
                       <Button
                         variant="primary"
                         size="sm"
-                        class="bg-blue-500 hover:bg-blue-600"
-                        onClick={() => handleQuickStatusUpdate(task.id, 'in_progress')}
-                        title="Mark as in progress"
+                        class="!min-w-0 !px-2 !bg-blue-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickStatusUpdate(task.id, 'in_progress');
+                        }}
+                        title="In progress"
                       >
-                        ▶️
+                        ▶
                       </Button>
                     </Show>
 
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => navigate(`/tasks/${task.id}/edit`)}
-                      title="Edit task"
+                      class="!min-w-0 !px-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/tasks/${task.id}/edit`);
+                      }}
+                      title="Edit"
                     >
-                      ✏️
+                      ✎
                     </Button>
-                    
+
                     <Button
                       variant="secondary"
                       size="sm"
-                      class="bg-red-500 hover:bg-red-600"
-                      onClick={() => handleDeleteTask(task.id)}
+                      class="!min-w-0 !px-2 !bg-red-500 hover:!bg-red-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteTask(task.id);
+                      }}
                       disabled={deleteTask.isPending}
-                      title="Delete task"
+                      title="Delete"
                     >
-                      🗑️
+                      ×
                     </Button>
-                  </div>
-
-                  {/* Status Badge */}
-                  <div class="absolute bottom-2 left-2">
-                    <Badge 
-                      variant={
-                        task.status === 'done' ? 'success' :
-                        task.status === 'in_progress' ? 'primary' :
-                        task.status === 'todo' ? 'warning' :
-                        task.status === 'cancelled' ? 'destructive' : 'secondary'
-                      }
-                      class="text-xs"
-                    >
-                      {task.status.replace('_', ' ').toUpperCase()}
-                    </Badge>
                   </div>
                 </div>
               )}
             </For>
+
+            {/* Add quick task placeholder */}
+            <button
+              type="button"
+              class="flex min-h-[220px] flex-col items-center justify-center gap-3 border-3 border-dashed border-neutral-gray bg-background p-6 text-center shadow-none transition-all hover:border-black hover:bg-ledger-pale/50"
+              onClick={() => navigate('/tasks/new')}
+            >
+              <span class="text-4xl font-light leading-none text-neutral-gray">+</span>
+              <span class="font-heading text-sm font-black uppercase text-neutral-darkGray">Add quick task</span>
+            </button>
           </div>
         </Show>
 
         <Show when={viewMode() === 'kanban'}>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div
-              class="border-2 border-neutral-black bg-neutral-white"
+              class="border-3 border-black bg-white"
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDropToStatus(e as any, 'todo')}
+              onDrop={(e) => onDropToStatus(e as DragEvent, 'todo')}
             >
-              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">Todo</div>
-              <div class="p-3 space-y-3">
+              <div class="border-b-3 border-black bg-ledger-pale p-3 font-heading text-sm font-black uppercase">Todo</div>
+              <div class="space-y-3 p-3">
                 <For each={tasksByStatus().todo}>
-                  {(task: any) => (
+                  {(task: any, i) => (
                     <div class="relative">
-                      <div class="absolute top-2 left-2 z-10">
+                      <div class="absolute left-2 top-2 z-20">
                         <input
                           type="checkbox"
+                          class="checkbox h-5 w-5"
                           checked={selectedIds().has(task.id)}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                          onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
                         />
                       </div>
-                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as DragEvent, task.id)}>
                         <TaskCard
                           title={task.title}
                           description={task.description || ''}
                           priority={task.priority}
-                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          dueDate={formatTaskDue(task.due_date)}
                           status={task.status}
+                          tags={tagsForRow(rowIndex(i))}
                           onClick={() => navigate(`/tasks/${task.id}`)}
                         />
                       </div>
@@ -562,30 +611,32 @@ const Tasks: Component = () => {
             </div>
 
             <div
-              class="border-2 border-neutral-black bg-neutral-white"
+              class="border-3 border-black bg-white"
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDropToStatus(e as any, 'in_progress')}
+              onDrop={(e) => onDropToStatus(e as DragEvent, 'in_progress')}
             >
-              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">In Progress</div>
-              <div class="p-3 space-y-3">
+              <div class="border-b-3 border-black bg-ledger-sky p-3 font-heading text-sm font-black uppercase">In progress</div>
+              <div class="space-y-3 p-3">
                 <For each={tasksByStatus().in_progress}>
-                  {(task: any) => (
+                  {(task: any, i) => (
                     <div class="relative">
-                      <div class="absolute top-2 left-2 z-10">
+                      <div class="absolute left-2 top-2 z-20">
                         <input
                           type="checkbox"
+                          class="checkbox h-5 w-5"
                           checked={selectedIds().has(task.id)}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                          onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
                         />
                       </div>
-                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as DragEvent, task.id)}>
                         <TaskCard
                           title={task.title}
                           description={task.description || ''}
                           priority={task.priority}
-                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          dueDate={formatTaskDue(task.due_date)}
                           status={task.status}
+                          tags={tagsForRow(rowIndex(i))}
                           onClick={() => navigate(`/tasks/${task.id}`)}
                         />
                       </div>
@@ -596,30 +647,32 @@ const Tasks: Component = () => {
             </div>
 
             <div
-              class="border-2 border-neutral-black bg-neutral-white"
+              class="border-3 border-black bg-white"
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDropToStatus(e as any, 'done')}
+              onDrop={(e) => onDropToStatus(e as DragEvent, 'done')}
             >
-              <div class="p-3 font-heading font-black uppercase border-b-2 border-neutral-black">Done</div>
-              <div class="p-3 space-y-3">
+              <div class="border-b-3 border-black bg-ledger-lime p-3 font-heading text-sm font-black uppercase">Done</div>
+              <div class="space-y-3 p-3">
                 <For each={tasksByStatus().done}>
-                  {(task: any) => (
+                  {(task: any, i) => (
                     <div class="relative">
-                      <div class="absolute top-2 left-2 z-10">
+                      <div class="absolute left-2 top-2 z-20">
                         <input
                           type="checkbox"
+                          class="checkbox h-5 w-5"
                           checked={selectedIds().has(task.id)}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={(e: any) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                          onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
                         />
                       </div>
-                      <div draggable onDragStart={(e) => onDragStartTask(e as any, task.id)}>
+                      <div draggable onDragStart={(e) => onDragStartTask(e as DragEvent, task.id)}>
                         <TaskCard
                           title={task.title}
                           description={task.description || ''}
                           priority={task.priority}
-                          dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          dueDate={formatTaskDue(task.due_date)}
                           status={task.status}
+                          tags={tagsForRow(rowIndex(i))}
                           onClick={() => navigate(`/tasks/${task.id}`)}
                         />
                       </div>
@@ -631,38 +684,28 @@ const Tasks: Component = () => {
           </div>
         </Show>
 
-        {/* Pagination */}
         <Show when={tasks.data?.pagination && viewMode() !== 'kanban'}>
-          <div class="flex items-center justify-between mt-8">
-            <p class="text-sm text-neutral-darkGray">
+          <div class="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p class="font-body text-sm text-neutral-darkGray">
               Showing {tasks.data?.data?.length || 0} of {tasks.data?.pagination?.total || 0} tasks
             </p>
-            
-            <div class="flex gap-2">
-              <Button
-                variant="secondary"
-                disabled={!tasks.data?.pagination?.has_prev}
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-              >
+
+            <div class="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" disabled={!tasks.data?.pagination?.has_prev} onClick={() => setPage((p) => Math.max(1, p - 1))}>
                 ← Previous
               </Button>
-              
-              <Badge variant="primary" class="px-4 py-2">
-                Page {page()} of {tasks.data?.pagination?.total_pages || 1}
+
+              <Badge variant="primary" class="border-3 border-black px-4 py-2 font-heading">
+                Page {page()} / {tasks.data?.pagination?.total_pages || 1}
               </Badge>
-              
-              <Button
-                variant="secondary"
-                disabled={!tasks.data?.pagination?.has_next}
-                onClick={() => setPage(p => p + 1)}
-              >
+
+              <Button variant="secondary" disabled={!tasks.data?.pagination?.has_next} onClick={() => setPage((p) => p + 1)}>
                 Next →
               </Button>
             </div>
           </div>
         </Show>
       </Show>
-
     </div>
   );
 };

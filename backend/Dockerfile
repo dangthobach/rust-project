@@ -1,12 +1,13 @@
 # Multi-stage Docker build for Neo CRM Backend
 
 # Build stage
-FROM rust:1.79-slim as builder
+FROM rust:1.88-slim AS builder
 
 WORKDIR /app
 
 # Install dependencies for SSL (PostgreSQL via sqlx)
 RUN apt-get update && apt-get install -y \
+    build-essential \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -15,9 +16,10 @@ RUN apt-get update && apt-get install -y \
 COPY Cargo.toml Cargo.lock ./
 
 # Build dependencies (cached layer - speeds up rebuilds)
-RUN mkdir src && \
+RUN mkdir -p src/bin && \
     echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
+    echo "fn main() {}" > src/bin/hash_password.rs && \
+    cargo build --release --bin crm-backend && \
     rm -rf src
 
 # Copy actual source code

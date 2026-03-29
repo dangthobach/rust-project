@@ -1,8 +1,16 @@
 version: '3.9'
 
+# Database: use PostgreSQL on-premise (or any reachable host). Set DATABASE_URL in a root `.env` file,
+# e.g. postgresql://user:pass@host.docker.internal:5432/crm when Postgres runs on the same machine as Docker
+# (extra_hosts on `backend` enables host.docker.internal on Linux). Optional bundled Postgres:
+#   docker compose --profile local-postgres up -d postgres
+# and set DATABASE_URL=postgresql://crm_app:crm_app@postgres:5432/crm
+
 services:
-  # PostgreSQL 17 — database for CRM (on-premise / Docker)
+  # PostgreSQL in Docker — only started with: docker compose --profile local-postgres up -d postgres
   postgres:
+    profiles:
+      - local-postgres
     image: postgres:17-alpine
     container_name: neo-crm-postgres
     environment:
@@ -29,14 +37,24 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: neo-crm-backend
+    # Same-host Postgres on-premise from inside containers (Linux Docker):
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgresql://crm_app:crm_app@postgres:5432/crm
+      # Set in project root `.env` (do not put the URL default here — `:` in postgresql:// breaks Compose interpolation)
+      DATABASE_URL: ${DATABASE_URL}
       RUST_LOG: info
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       # Enables Redis Streams event bus (CQRS/Event streaming parts)
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       # Enables RabbitMQ worker consumers (thumbnail/report async jobs)
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://crm:crm-pass@rabbitmq:5672/%2f}
+      # S3-compatible RustFS (same hostnames as on the Docker network)
+      OBJECT_STORAGE_PROVIDER: ${OBJECT_STORAGE_PROVIDER:-rustfs}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://rustfs:9000}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crm-objects}
+      OBJECT_STORAGE_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      OBJECT_STORAGE_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
       HOST: 0.0.0.0
       PORT: 3000
@@ -45,12 +63,12 @@ services:
       - "3000:3000"  # API port
       - "9090:9090"  # Metrics port
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      rustfs:
+        condition: service_started
     volumes:
       - backend-data:/app/data
       - backend-uploads:/app/uploads
@@ -99,6 +117,61 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # RustFS — S3-compatible object storage (pin tag: https://hub.docker.com/r/rustfs/rustfs/tags )
+  rustfs:
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:latest}
+    container_name: neo-crm-rustfs
+    environment:
+      RUSTFS_VOLUMES: ${RUSTFS_VOLUMES:-/data/rustfs{0..3}}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      RUSTFS_CORS_ALLOWED_ORIGINS: ${RUSTFS_CORS_ALLOWED_ORIGINS:-*}
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: ${RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS:-*}
+    ports:
+      - "${RUSTFS_API_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs-data:/data
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9000/health >/dev/null && curl -fsS http://127.0.0.1:9001/rustfs/console/health >/dev/null",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  # Create default bucket (mc speaks S3 API; works with RustFS)
+  rustfs-init:
+    image: minio/mc:latest
+    container_name: neo-crm-rustfs-init
+    depends_on:
+      rustfs:
+        condition: service_started
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+          mc alias set local http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY" 2>/dev/null && break
+          sleep 2
+        done
+        mc mb local/crm-objects --ignore-existing || true
+    networks:
+      - crm-network
+    restart: "no"
 
   # RabbitMQ (async jobs: thumbnail.generate, report.export.*)
   rabbitmq:
@@ -168,6 +241,8 @@ volumes:
   backend-uploads:
     driver: local
   redis-data:
+    driver: local
+  rustfs-data:
     driver: local
   rabbitmq-data:
     driver: local

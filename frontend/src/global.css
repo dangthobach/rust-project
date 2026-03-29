@@ -71,9 +71,9 @@
     @apply px-8 py-4 text-lg shadow-brutal-lg hover:shadow-brutal-xl;
   }
 
-  /* Brutal Card Styles */
+  /* Brutal Card Styles (Industrial: 3px border, hard shadow) */
   .card {
-    @apply border-5 border-black bg-white shadow-brutal;
+    @apply border-3 border-black bg-white shadow-brutal;
     @apply transition-all duration-150;
   }
 
