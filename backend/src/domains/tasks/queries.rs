@@ -1,6 +1,15 @@
+use serde::Serialize;
+
 use crate::authz::data_scope::DataScope;
 use crate::core::cqrs::Query;
 use crate::models::Task;
+
+/// Paginated list result for `ListTasksQuery` (total matches the same filters as `tasks`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ListTasksResult {
+    pub tasks: Vec<Task>,
+    pub total: i64,
+}
 
 /// Get Task by ID Query
 #[derive(Debug, Clone)]
@@ -36,7 +45,7 @@ pub struct ListTasksQuery {
 }
 
 impl Query for ListTasksQuery {
-    type Response = Vec<Task>;
+    type Response = ListTasksResult;
 
     fn query_name(&self) -> &'static str {
         "ListTasks"

@@ -7,7 +7,8 @@ type Notification = ApiNotification & { isRead: boolean; time: string };
 export const NotificationPanel: Component = () => {
   const [showAll, setShowAll] = createSignal(false);
   const [notifications] = createResource<Notification[]>(async () => {
-    const rows = await api.getNotifications();
+    const res = await api.getNotifications();
+    const rows = res.data ?? [];
     return rows.map((n) => ({
       ...n,
       isRead: n.is_read ?? n.read ?? false,

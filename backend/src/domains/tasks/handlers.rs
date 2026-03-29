@@ -9,7 +9,7 @@ use crate::core::shared::append_aggregate_history;
 use crate::authz::data_scope::{self, can_read_task};
 use crate::domains::tasks::{
     CompleteTaskCommand, CreateTaskCommand, DeleteTaskCommand, UpdateTaskCommand,
-    GetTaskQuery, GetTasksByClientQuery, GetTasksByUserQuery, ListTasksQuery,
+    GetTaskQuery, GetTasksByClientQuery, GetTasksByUserQuery, ListTasksQuery, ListTasksResult,
 };
 use crate::error::AppError;
 use crate::models::Task;
@@ -401,42 +401,54 @@ impl ListTasksHandler {
     }
 }
 
+/// Shared WHERE clause for list + count (must stay in sync).
+fn push_list_tasks_filters<'a>(
+    qb: &mut QueryBuilder<'a, Postgres>,
+    query: &'a ListTasksQuery,
+) -> Result<(), AppError> {
+    if let Some(status) = &query.status {
+        qb.push(" AND status = ")
+            .push_bind(normalize_status(Some(status.as_str()))?);
+    }
+    if let Some(priority) = &query.priority {
+        qb.push(" AND priority = ")
+            .push_bind(normalize_priority(Some(priority.as_str()))?);
+    }
+    if let Some(assigned_to) = &query.assigned_to {
+        qb.push(" AND assigned_to = ").push_bind(assigned_to);
+    }
+    if let Some(client_id) = &query.client_id {
+        qb.push(" AND client_id = ").push_bind(client_id);
+    }
+
+    if query.due_today.unwrap_or(false) {
+        qb.push(" AND due_date IS NOT NULL AND (due_date AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AND status != 'done'");
+    }
+
+    if query.overdue.unwrap_or(false) {
+        qb.push(" AND due_date IS NOT NULL AND due_date < NOW() AND status != 'done'");
+    }
+
+    data_scope::push_task_scope_filter(qb, &query.data_scope, &query.actor_user_id);
+
+    Ok(())
+}
+
 #[async_trait]
 impl QueryHandler<ListTasksQuery> for ListTasksHandler {
     type Error = AppError;
 
-    async fn handle(&self, query: ListTasksQuery) -> Result<Vec<Task>, Self::Error> {
+    async fn handle(&self, query: ListTasksQuery) -> Result<ListTasksResult, Self::Error> {
+        let mut count_qb =
+            QueryBuilder::<Postgres>::new("SELECT COUNT(*)::bigint FROM tasks WHERE 1=1");
+        push_list_tasks_filters(&mut count_qb, &query)?;
+        let total: i64 = count_qb
+            .build_query_scalar()
+            .fetch_one(&*self.pool)
+            .await?;
+
         let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM tasks WHERE 1=1");
-
-        if let Some(status) = &query.status {
-            qb.push(" AND status = ")
-                .push_bind(normalize_status(Some(status.as_str()))?);
-        }
-        if let Some(priority) = &query.priority {
-            qb.push(" AND priority = ")
-                .push_bind(normalize_priority(Some(priority.as_str()))?);
-        }
-        if let Some(assigned_to) = &query.assigned_to {
-            qb.push(" AND assigned_to = ").push_bind(assigned_to);
-        }
-        if let Some(client_id) = &query.client_id {
-            qb.push(" AND client_id = ").push_bind(client_id);
-        }
-
-        if query.due_today.unwrap_or(false) {
-            qb.push(" AND due_date IS NOT NULL AND (due_date AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AND status != 'done'");
-        }
-
-        if query.overdue.unwrap_or(false) {
-            qb.push(" AND due_date IS NOT NULL AND due_date < NOW() AND status != 'done'");
-        }
-
-        data_scope::push_task_scope_filter(
-            &mut qb,
-            &query.data_scope,
-            &query.actor_user_id,
-        );
-
+        push_list_tasks_filters(&mut qb, &query)?;
         qb.push(" ORDER BY created_at DESC");
         qb.push(" LIMIT ").push_bind(query.limit.unwrap_or(50).max(1));
         qb.push(" OFFSET ").push_bind(query.offset.unwrap_or(0).max(0));
@@ -446,7 +458,7 @@ impl QueryHandler<ListTasksQuery> for ListTasksHandler {
             .fetch_all(&*self.pool)
             .await?;
 
-        Ok(tasks)
+        Ok(ListTasksResult { tasks, total })
     }
 }
 

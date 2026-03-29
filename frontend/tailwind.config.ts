@@ -17,6 +17,7 @@ export default {
         ledger: {
           cream: '#F5F5F0',
           lime: '#A3FF00',
+          electric: '#0052FF',
           orange: '#FF5C00',
           sky: '#A0C4FF',
           pale: '#FDFFB6',

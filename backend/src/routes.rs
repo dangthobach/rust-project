@@ -14,7 +14,7 @@ use crate::api::{
 };
 use crate::app_state::AppState;
 use crate::config::Config;
-use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, tasks, users, websocket};
+use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, search, tasks, users, websocket};
 use crate::middleware::{auth as auth_middleware, deprecation, rate_limit, rbac};
 
 /// Create router with uniform AppState
@@ -175,6 +175,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/dashboard/stats", get(dashboard::get_dashboard_stats))
         .route("/api/dashboard/activity-feed", get(dashboard::get_activity_feed))
         .route("/api/dashboard/health", get(dashboard::health_check))
+        .route("/api/search", get(search::unified_search))
         // Analytics routes (admin only)
         .route("/api/analytics/user-activity", get(analytics::get_user_activity_analytics))
         .route("/api/analytics/task-completion", get(analytics::get_task_completion_analytics))
@@ -204,18 +205,28 @@ pub fn create_router_with_state(state: AppState) -> Router {
         // File system CQRS routes (new standardized endpoints)
         .route("/api/fs/files", get(fs_cqrs::list_files))
         .route("/api/fs/files", post(fs_cqrs::create_file))
+        .route("/api/fs/files/upload", post(fs_cqrs::upload_file))
         .route("/api/fs/files/search", get(fs_cqrs::search_files))
         .route("/api/fs/files/:id", get(fs_cqrs::get_file))
         .route("/api/fs/files/:id", delete(fs_cqrs::delete_file))
         .route("/api/fs/files/:id/move", patch(fs_cqrs::move_file))
         .route("/api/fs/files/:id/rename", patch(fs_cqrs::rename_file))
+        .route("/api/fs/files/:id/download-url", get(fs_cqrs::get_download_url_fs))
+        .route("/api/fs/files/:id/permissions", get(fs_cqrs::get_permissions).put(fs_cqrs::set_permissions))
+        .route("/api/fs/files/:id/versions", get(fs_cqrs::list_versions))
+        .route("/api/fs/files/:id/rollback", post(fs_cqrs::rollback_version))
+        .route("/api/fs/files/:id/star", post(fs_cqrs::star_file).delete(fs_cqrs::unstar_file))
+        .route("/api/fs/files/:id/activity", get(fs_cqrs::get_activity))
         .route("/api/fs/folders", post(fs_cqrs::create_folder))
         .route("/api/fs/folders/:id/tree", get(fs_cqrs::get_folder_tree))
         // Export routes (authenticated users)
         .route("/api/export/clients", get(export::export_clients))
         .route("/api/export/tasks", get(export::export_tasks))
         // Async Reports exports (queued -> ready)
-        .route("/api/reports/exports", post(reports::start_report_export))
+        .route(
+            "/api/reports/exports",
+            get(reports::list_report_exports).post(reports::start_report_export),
+        )
         .route(
             "/api/reports/exports/:id",
             get(reports::get_report_export_status),

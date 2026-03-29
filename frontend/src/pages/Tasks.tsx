@@ -1,6 +1,6 @@
-import { Component, createSignal, For, Show, createMemo, type Accessor } from 'solid-js';
-import { A, useNavigate } from '@solidjs/router';
-import { Card, Button, Badge, Input, Spinner } from '~/components/ui';
+import { Component, createSignal, For, Show, createMemo, createEffect, type Accessor } from 'solid-js';
+import { useNavigate, useLocation } from '@solidjs/router';
+import { Card, Button, Input, Spinner } from '~/components/ui';
 import { TaskCard, type TaskTagTone } from '~/components/crm';
 import ExportButton from '~/components/ExportButton';
 import { useTasks, useUpdateTask, useDeleteTask, useCompleteTask, useTaskStats, useCurrentUser } from '~/lib/hooks';
@@ -36,6 +36,7 @@ function tagsForRow(index: number): Array<{ label: string; tone: TaskTagTone }> 
 
 const Tasks: Component = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [page, setPage] = createSignal(1);
   const [search, setSearch] = createSignal('');
   const [status, setStatus] = createSignal('');
@@ -47,6 +48,12 @@ const Tasks: Component = () => {
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
 
   const me = useCurrentUser();
+
+  createEffect(() => {
+    if (!location.pathname.startsWith('/tasks')) return;
+    const q = new URLSearchParams(location.search).get('q');
+    if (q !== null) setSearch(q);
+  });
 
   const tasks = useTasks(() => ({
     page: page(),
@@ -90,6 +97,16 @@ const Tasks: Component = () => {
     }
   };
 
+  const paginationPageButtons = createMemo(() => {
+    const tp = tasks.data?.pagination?.total_pages || 1;
+    const cur = page();
+    const nums: number[] = [];
+    const start = Math.max(1, Math.min(cur, tp) - 1);
+    const end = Math.min(tp, start + 2);
+    for (let i = start; i <= end; i++) nums.push(i);
+    return nums;
+  });
+
   const stats = createMemo(
     () =>
       taskStats.data || {
@@ -99,14 +116,10 @@ const Tasks: Component = () => {
         inProgress: 0,
         overdue: 0,
         dueToday: 0,
+        weekOverWeekPct: 0,
         byPriority: { high: 0, medium: 0, low: 0 },
       },
   );
-
-  const displayName = createMemo(() => {
-    const u = me.data as { full_name?: string; username?: string; email?: string } | undefined;
-    return u?.full_name || u?.username || u?.email || 'Alex Rivera';
-  });
 
   const handleUpdateTask = (taskId: string, updates: Record<string, unknown>) => {
     updateTask.mutate({ id: taskId, updates });
@@ -151,7 +164,7 @@ const Tasks: Component = () => {
     });
   };
 
-  const clearSelection = () => setSelectedIds(new Set());
+  const clearSelection = () => setSelectedIds(new Set<string>());
 
   const bulkAction = async (action: 'complete' | 'cancel' | 'delete') => {
     const ids = Array.from(selectedIds());
@@ -207,231 +220,231 @@ const Tasks: Component = () => {
   const statusBtn = (active: boolean) =>
     [
       'border-3 border-black px-3 py-2 font-heading text-xs font-black uppercase tracking-wide shadow-brutal-sm transition-all',
-      active ? 'bg-black text-white -translate-x-0.5 -translate-y-0.5' : 'bg-white text-black hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-ledger-pale',
+      active
+        ? 'bg-ledger-lime text-black -translate-x-0.5 -translate-y-0.5'
+        : 'bg-white text-black hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-ledger-pale',
     ].join(' ');
 
   return (
     <div class="font-body">
-      {/* Page header — Task Management */}
-      <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+      {/* Page header — Task Management (match HTML mock top bar within page) */}
+      <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
+        <div class="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
         <h1 class="shrink-0 font-heading text-2xl font-black uppercase tracking-tight text-black sm:text-3xl">
           Task Management
         </h1>
 
-        <div class="relative min-w-0 flex-1">
-          <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-lg" aria-hidden="true">
-            🔍
+        <div class="relative min-w-0 flex-1 lg:w-96">
+          <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-neutral-gray" aria-hidden="true">
+            <span class="material-symbols-outlined">search</span>
           </span>
           <Input
             type="text"
-            placeholder="Search tasks..."
+            placeholder="SEARCH ARCHIVE / DATA..."
             value={search()}
             onInput={(e) => handleSearch(e.currentTarget.value)}
-            class="!pl-10 font-body"
+            class="!pl-10 !bg-white !border-[3px] !border-black py-2 font-heading text-sm font-bold uppercase focus:!border-secondary"
           />
         </div>
-
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-3">
-          <A
-            href="/notifications"
-            class="relative inline-flex h-11 w-11 items-center justify-center border-3 border-black bg-white text-xl shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
-            aria-label="Notifications"
+        </div>
+        <div class="flex shrink-0 flex-wrap items-center gap-3">
+          <button
+            type="button"
+            class="border-[3px] border-black bg-neutral-lightGray px-4 py-2 font-heading text-xs font-black uppercase shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
+            onClick={() => handleExport('csv')}
           >
-            🔔
-            <span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-black" />
-          </A>
-          <A
-            href="/profile"
-            class="inline-flex h-11 w-11 items-center justify-center border-3 border-black bg-white text-xl shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
-            aria-label="Settings"
-          >
-            ⚙️
-          </A>
-          <div class="hidden h-8 w-[3px] bg-black sm:block" />
-          <div class="flex items-center gap-3 border-3 border-black bg-white px-3 py-2 shadow-brutal-sm">
-            <div class="hidden text-right sm:block">
-              <div class="font-heading text-xs font-black uppercase leading-tight text-black">
-                {displayName()}
-              </div>
-              <div class="font-heading text-[10px] font-bold uppercase text-neutral-darkGray">Admin access</div>
-            </div>
-            <div
-              class="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-black bg-ledger-pale font-heading text-xs font-black shadow-brutal-sm"
-              aria-hidden="true"
-            >
-              AR
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Stat cards — compact neon accents */}
-      <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div class="border-3 border-black bg-white p-3 shadow-brutal-sm">
-          <div class="mb-1 flex items-center justify-between text-ledger-sky">
-            <span class="text-xl" aria-hidden="true">
-              📊
-            </span>
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{stats().total}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-neutral-darkGray">Total tasks</div>
-        </div>
-        <div class="border-3 border-black bg-ledger-lime p-3 shadow-brutal-sm">
-          <div class="mb-1 text-xl" aria-hidden="true">
-            ✓
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{stats().completed}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Completed</div>
-        </div>
-        <div class="border-3 border-black bg-ledger-sky p-3 shadow-brutal-sm">
-          <div class="mb-1 text-xl" aria-hidden="true">
-            💼
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{stats().pending}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Pending</div>
-        </div>
-        <div class="border-3 border-black bg-ledger-mint p-3 shadow-brutal-sm">
-          <div class="mb-1 text-xl" aria-hidden="true">
-            ↻
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{stats().inProgress}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">In progress</div>
-        </div>
-        <div class="border-3 border-black bg-ledger-orange p-3 text-white shadow-brutal-sm">
-          <div class="mb-1 text-xl" aria-hidden="true">
-            !
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{String(stats().overdue).padStart(2, '0')}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-white/90">Overdue</div>
-        </div>
-        <div class="border-3 border-black bg-ledger-pale p-3 shadow-brutal-sm">
-          <div class="mb-1 text-xl" aria-hidden="true">
-            📅
-          </div>
-          <div class="font-heading text-2xl font-black tabular-nums">{String(stats().dueToday).padStart(2, '0')}</div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-wide text-black/80">Due today</div>
-        </div>
-      </div>
-
-      {/* Toolbar: status + priority + CTA */}
-      <div class="mb-4 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div class="flex flex-wrap items-center gap-2">
-          <button type="button" class={statusBtn(status() === '')} onClick={() => handleFilterChange('status', '')}>
-            All status
-          </button>
-          <button type="button" class={statusBtn(status() === 'todo')} onClick={() => handleFilterChange('status', 'todo')}>
-            Todo
+            <span class="material-symbols-outlined text-base mr-2">file_download</span>
+            Export
           </button>
           <button
             type="button"
-            class={statusBtn(status() === 'in_progress')}
-            onClick={() => handleFilterChange('status', 'in_progress')}
-          >
-            In progress
-          </button>
-          <button type="button" class={statusBtn(status() === 'done')} onClick={() => handleFilterChange('status', 'done')}>
-            Done
-          </button>
-          <button
-            type="button"
-            class={statusBtn(status() === 'cancelled')}
-            onClick={() => handleFilterChange('status', 'cancelled')}
-          >
-            Cancelled
-          </button>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <label class="flex items-center gap-2 font-heading text-xs font-black uppercase">
-            <span class="hidden sm:inline">Priority</span>
-            <select
-              class="select max-w-[200px] border-3 border-black bg-white py-2 font-heading text-xs font-bold uppercase shadow-brutal-sm"
-              value={priority()}
-              onChange={(e) => handleFilterChange('priority', e.currentTarget.value)}
-            >
-              <option value="">All</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
-          </label>
-
-          <div class="flex gap-1 border-3 border-black bg-white p-1 shadow-brutal-sm">
-            <button
-              type="button"
-              class={viewMode() === 'grid' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
-              onClick={() => setViewMode('grid')}
-            >
-              Grid
-            </button>
-            <button
-              type="button"
-              class={viewMode() === 'list' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
-              onClick={() => setViewMode('list')}
-            >
-              List
-            </button>
-            <button
-              type="button"
-              class={viewMode() === 'kanban' ? 'bg-black px-2 py-1 text-xs font-black uppercase text-white' : 'px-2 py-1 text-xs font-bold uppercase'}
-              onClick={() => setViewMode('kanban')}
-            >
-              Kanban
-            </button>
-          </div>
-
-          <ExportButton onExport={handleExport} isExporting={isExporting()} label="Export" />
-
-          <Button
-            variant="secondary"
-            size="sm"
+            class="border-[3px] border-black bg-ledger-electric px-4 py-2 font-heading text-xs font-black uppercase text-white shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
             onClick={() => {
-              setMyOnly((v) => !v);
+              setMyOnly(true);
               setPage(1);
             }}
           >
-            {myOnly() ? 'All tasks' : 'My tasks'}
-          </Button>
-
+            My tasks
+          </button>
           <button
             type="button"
-            class="border-3 border-black bg-ledger-lime px-4 py-2 font-heading text-xs font-black uppercase shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
+            class="border-[3px] border-black bg-ledger-lime px-6 py-2 font-heading text-xs font-black uppercase shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
             onClick={() => navigate('/tasks/new')}
           >
-            + New task
+            <span class="material-symbols-outlined text-base mr-2">add_box</span>
+            New task
           </button>
         </div>
       </div>
 
-      {/* Due filters + reset */}
-      <div class="mb-6 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class={statusBtn(dueTodayOnly())}
-          onClick={() => {
-            setDueTodayOnly((v) => !v);
-            if (!dueTodayOnly()) setOverdueOnly(false);
-            setPage(1);
-          }}
-        >
-          Due today
-        </button>
-        <button
-          type="button"
-          class={statusBtn(overdueOnly())}
-          onClick={() => {
-            setOverdueOnly((v) => !v);
-            if (!overdueOnly()) setDueTodayOnly(false);
-            setPage(1);
-          }}
-        >
-          Overdue
-        </button>
-        <button type="button" class={statusBtn(false)} onClick={resetFilters}>
-          Reset filters
-        </button>
-      </div>
+      {/* Stat Cards Section — match HTML mock */}
+      <section class="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-6">
+        <div class="bg-white border-[3px] border-black p-6 flex flex-col justify-between">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-ledger-electric text-3xl" aria-hidden="true">analytics</span>
+            <span class="bg-black text-white px-2 py-0.5 font-heading text-[10px] font-black uppercase">
+              {stats().weekOverWeekPct >= 0 ? '+' : ''}
+              {stats().weekOverWeekPct}%
+            </span>
+          </div>
+          <div>
+            <p class="font-heading text-[10px] text-neutral-gray uppercase font-black tracking-widest">Total tasks</p>
+            <p class="font-heading font-black text-4xl tabular-nums">{stats().total.toLocaleString('en-US')}</p>
+          </div>
+        </div>
+
+        <div class="bg-white border-[3px] border-black border-l-[12px] border-l-ledger-lime p-6">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-green-700 text-3xl" aria-hidden="true">check_circle</span>
+          </div>
+          <p class="font-heading text-[10px] text-neutral-gray uppercase font-black tracking-widest">Completed</p>
+          <p class="font-heading font-black text-4xl tabular-nums text-green-700">{stats().completed.toLocaleString('en-US')}</p>
+        </div>
+
+        <div class="bg-white border-[3px] border-black border-l-[12px] border-l-ledger-electric p-6">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-ledger-electric text-3xl" aria-hidden="true">sync</span>
+          </div>
+          <p class="font-heading text-[10px] text-neutral-gray uppercase font-black tracking-widest">In progress</p>
+          <p class="font-heading font-black text-4xl tabular-nums text-ledger-electric">{stats().inProgress.toLocaleString('en-US')}</p>
+        </div>
+
+        <div class="bg-white border-[3px] border-black border-l-[12px] border-l-neutral-lightGray p-6">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-neutral-gray text-3xl" aria-hidden="true">hourglass_empty</span>
+          </div>
+          <p class="font-heading text-[10px] text-neutral-gray uppercase font-black tracking-widest">Pending</p>
+          <p class="font-heading font-black text-4xl tabular-nums">{stats().pending.toLocaleString('en-US')}</p>
+        </div>
+
+        <div class="bg-white border-[3px] border-black border-l-[12px] border-l-red-500 p-6">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-red-600 text-3xl" aria-hidden="true">error</span>
+          </div>
+          <p class="font-heading text-[10px] text-neutral-gray uppercase font-black tracking-widest">Overdue</p>
+          <p class="font-heading font-black text-4xl tabular-nums text-red-600">{String(stats().overdue).padStart(2, '0')}</p>
+        </div>
+
+        <div class="bg-ledger-lime border-[3px] border-black p-6">
+          <div class="flex justify-between items-start mb-4">
+            <span class="material-symbols-outlined text-black text-3xl" aria-hidden="true">calendar_today</span>
+          </div>
+          <p class="font-heading text-[10px] text-black uppercase font-black tracking-widest">Due today</p>
+          <p class="font-heading font-black text-4xl tabular-nums text-black">{String(stats().dueToday).padStart(2, '0')}</p>
+        </div>
+      </section>
+
+      {/* Filter Bar — match HTML mock (button groups inside bordered strips) */}
+      <section class="bg-white border-[3px] border-black p-4 flex flex-wrap items-center justify-between gap-6">
+        <div class="flex items-center gap-8">
+          <div class="flex flex-col gap-1">
+            <label class="font-heading text-[10px] font-black uppercase tracking-tighter text-neutral-gray">Filter By Status</label>
+            <div class="flex border-[3px] border-black bg-white">
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase bg-ledger-lime border-r-[3px] border-black"
+                onClick={() => handleFilterChange('status', '')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray border-r-[3px] border-black transition-colors"
+                onClick={() => handleFilterChange('status', 'todo')}
+              >
+                Todo
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray border-r-[3px] border-black transition-colors"
+                onClick={() => handleFilterChange('status', 'in_progress')}
+              >
+                Active
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray border-r-[3px] border-black transition-colors"
+                onClick={() => handleFilterChange('status', 'done')}
+              >
+                Done
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray transition-colors"
+                onClick={() => handleFilterChange('status', 'cancelled')}
+              >
+                Cancelled
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-1">
+            <label class="font-heading text-[10px] font-black uppercase tracking-tighter text-neutral-gray">Priority Level</label>
+            <div class="flex border-[3px] border-black bg-white">
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase bg-white border-r-[3px] border-black"
+                onClick={() => handleFilterChange('priority', '')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray border-r-[3px] border-black transition-colors text-red-700"
+                onClick={() => handleFilterChange('priority', 'urgent')}
+              >
+                Urgent
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray border-r-[3px] border-black transition-colors"
+                onClick={() => handleFilterChange('priority', 'high')}
+              >
+                High
+              </button>
+              <button
+                type="button"
+                class="px-4 py-1.5 font-heading text-xs font-black uppercase hover:bg-neutral-lightGray transition-colors"
+                onClick={() => handleFilterChange('priority', 'low')}
+              >
+                Low
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div class="flex border-[3px] border-black bg-white">
+            <button
+              type="button"
+              class={viewMode() === 'grid' ? 'p-2 border-r-[3px] border-black bg-neutral-lightGray' : 'p-2 border-r-[3px] border-black hover:bg-neutral-lightGray'}
+              onClick={() => setViewMode('grid')}
+              aria-label="Grid"
+              title="Grid"
+            >
+              <span class="material-symbols-outlined text-xl">grid_view</span>
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'list' ? 'p-2 border-r-[3px] border-black bg-neutral-lightGray' : 'p-2 border-r-[3px] border-black hover:bg-neutral-lightGray'}
+              onClick={() => setViewMode('list')}
+              aria-label="List"
+              title="List"
+            >
+              <span class="material-symbols-outlined text-xl">list</span>
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'kanban' ? 'p-2 bg-neutral-lightGray' : 'p-2 hover:bg-neutral-lightGray'}
+              onClick={() => setViewMode('kanban')}
+              aria-label="Kanban"
+              title="Kanban"
+            >
+              <span class="material-symbols-outlined text-xl">view_kanban</span>
+            </button>
+          </div>
+        </div>
+      </section>
 
       <Show when={selectedIds().size > 0}>
         <Card class="mb-6 p-4">
@@ -472,21 +485,36 @@ const Tasks: Component = () => {
 
       <Show when={tasks.data}>
         <Show when={viewMode() !== 'kanban'}>
-          <div
-            class={`grid gap-6 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' : 'grid-cols-1'}`}
+          <section
+            class={`grid gap-8 ${viewMode() === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}
           >
+            {/* Add quick task placeholder (placed first like mock) */}
+            <button
+              type="button"
+              class="border-[3px] border-black border-dashed h-full min-h-[320px] bg-white hover:bg-ledger-lime transition-colors group p-8 flex flex-col items-center justify-center text-center"
+              onClick={() => navigate('/tasks/new')}
+            >
+              <div class="w-16 h-16 border-[3px] border-black bg-white flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <span class="material-symbols-outlined text-4xl" aria-hidden="true">add</span>
+              </div>
+              <h3 class="font-heading font-bold text-xl uppercase tracking-tight">Add Quick Task</h3>
+              <p class="font-body text-sm text-neutral-gray mt-2">Initialize new ledger entry for the workspace.</p>
+            </button>
+
             <For each={tasks.data?.data || []}>
               {(task: any, i) => (
                 <div class="relative group">
-                  <div class="absolute left-3 top-3 z-20">
-                    <input
-                      type="checkbox"
-                      class="checkbox h-5 w-5"
-                      checked={selectedIds().has(task.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
-                    />
-                  </div>
+                  <Show when={viewMode() !== 'grid'}>
+                    <div class="absolute left-3 top-3 z-20">
+                      <input
+                        type="checkbox"
+                        class="checkbox h-5 w-5"
+                        checked={selectedIds().has(task.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => toggleSelected(task.id, !!e.currentTarget.checked)}
+                      />
+                    </div>
+                  </Show>
 
                   <TaskCard
                     title={task.title}
@@ -498,7 +526,8 @@ const Tasks: Component = () => {
                     onClick={() => navigate(`/tasks/${task.id}`)}
                   />
 
-                  <div class="absolute right-3 top-12 z-20 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Show when={viewMode() !== 'grid'}>
+                    <div class="absolute right-3 top-12 z-20 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                     <Show when={task.status !== 'done'}>
                       <Button
                         variant="primary"
@@ -555,21 +584,12 @@ const Tasks: Component = () => {
                     >
                       ×
                     </Button>
-                  </div>
+                    </div>
+                  </Show>
                 </div>
               )}
             </For>
-
-            {/* Add quick task placeholder */}
-            <button
-              type="button"
-              class="flex min-h-[220px] flex-col items-center justify-center gap-3 border-3 border-dashed border-neutral-gray bg-background p-6 text-center shadow-none transition-all hover:border-black hover:bg-ledger-pale/50"
-              onClick={() => navigate('/tasks/new')}
-            >
-              <span class="text-4xl font-light leading-none text-neutral-gray">+</span>
-              <span class="font-heading text-sm font-black uppercase text-neutral-darkGray">Add quick task</span>
-            </button>
-          </div>
+          </section>
         </Show>
 
         <Show when={viewMode() === 'kanban'}>
@@ -685,25 +705,54 @@ const Tasks: Component = () => {
         </Show>
 
         <Show when={tasks.data?.pagination && viewMode() !== 'kanban'}>
-          <div class="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <p class="font-body text-sm text-neutral-darkGray">
-              Showing {tasks.data?.data?.length || 0} of {tasks.data?.pagination?.total || 0} tasks
+          <footer class="mt-8 flex items-center justify-between border-[3px] border-black p-4 bg-white">
+            <p class="font-heading text-[10px] font-black uppercase text-neutral-gray">
+              {(() => {
+                const meta = tasks.data?.pagination;
+                if (!meta) return 'Showing 0-0 of 0 technical tasks';
+                const limit = meta.limit || 1;
+                const from = (meta.page - 1) * limit + 1;
+                const to = Math.min(meta.page * limit, meta.total);
+                const total = Number(meta.total).toLocaleString('en-US');
+                return `Showing ${from}-${to} of ${total} technical tasks`;
+              })()}
             </p>
 
-            <div class="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" disabled={!tasks.data?.pagination?.has_prev} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                ← Previous
-              </Button>
-
-              <Badge variant="primary" class="border-3 border-black px-4 py-2 font-heading">
-                Page {page()} / {tasks.data?.pagination?.total_pages || 1}
-              </Badge>
-
-              <Button variant="secondary" disabled={!tasks.data?.pagination?.has_next} onClick={() => setPage((p) => p + 1)}>
-                Next →
-              </Button>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="w-10 h-10 border-[3px] border-black flex items-center justify-center hover:bg-neutral-lightGray transition-colors disabled:opacity-40"
+                disabled={!tasks.data?.pagination?.has_prev}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                aria-label="Previous page"
+              >
+                <span class="material-symbols-outlined">chevron_left</span>
+              </button>
+              <For each={paginationPageButtons()}>
+                {(n) => (
+                  <button
+                    type="button"
+                    class={[
+                      'w-10 h-10 border-[3px] border-black flex items-center justify-center font-heading font-bold transition-colors',
+                      n === page() ? 'bg-ledger-lime' : 'hover:bg-neutral-lightGray',
+                    ].join(' ')}
+                    onClick={() => setPage(n)}
+                  >
+                    {n}
+                  </button>
+                )}
+              </For>
+              <button
+                type="button"
+                class="w-10 h-10 border-[3px] border-black flex items-center justify-center hover:bg-neutral-lightGray transition-colors disabled:opacity-40"
+                disabled={!tasks.data?.pagination?.has_next}
+                onClick={() => setPage((p) => p + 1)}
+                aria-label="Next page"
+              >
+                <span class="material-symbols-outlined">chevron_right</span>
+              </button>
             </div>
-          </div>
+          </footer>
         </Show>
       </Show>
     </div>

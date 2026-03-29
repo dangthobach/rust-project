@@ -109,5 +109,14 @@ impl HandlerState {
             self.service.clone(),
         )
     }
+
+    pub fn set_file_permissions_handler(&self) -> SetFilePermissionsHandler {
+        SetFilePermissionsHandler::new(
+            self.file_repo.clone(),
+            self.event_bus.clone(),
+            self.service.clone(),
+            self.pool.clone(),
+        )
+    }
 }
 

@@ -13,12 +13,14 @@ import TaskDetail from './pages/TaskDetail';
 import Reports from './pages/Reports';
 import Notifications from './pages/Notifications';
 import Files from './pages/Files';
+import FileDetail from './pages/FileDetail';
 import Users from './pages/Users';
 import Login from './pages/Login';
 import UserProfile from './pages/UserProfile';
 import UserManagement from './pages/UserManagement';
 import AdminDashboard from './pages/AdminDashboard';
 import Analytics from './pages/Analytics';
+import Search from './pages/Search';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 
@@ -155,10 +157,26 @@ const App: Component = () => {
         )}
       />
       <Route
+        path="/search"
+        component={() => (
+          <Layout>
+            <Search />
+          </Layout>
+        )}
+      />
+      <Route
         path="/notifications"
         component={() => (
           <Layout>
             <Notifications />
+          </Layout>
+        )}
+      />
+      <Route
+        path="/files/:id"
+        component={() => (
+          <Layout>
+            <FileDetail />
           </Layout>
         )}
       />

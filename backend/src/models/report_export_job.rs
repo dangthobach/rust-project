@@ -14,5 +14,9 @@ pub struct ReportExportJob {
     pub error_message: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Inclusive lower bound for filtering source rows by `created_at` (async export).
+    pub start_date: Option<chrono::NaiveDate>,
+    /// Inclusive upper bound for filtering source rows by `created_at` (async export).
+    pub end_date: Option<chrono::NaiveDate>,
 }
 

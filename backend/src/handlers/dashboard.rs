@@ -21,6 +21,8 @@ pub struct ClientStats {
     pub inactive: i64,
     pub new_this_week: i64,
     pub new_this_month: i64,
+    /// Open pipeline: clients in prospect or active (no separate revenue model).
+    pub pipeline_open: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +35,10 @@ pub struct TaskStats {
     pub overdue: i64,
     pub due_today: i64,
     pub due_this_week: i64,
+    /// Tasks created in the last 7 days (rolling).
+    pub created_last_7_days: i64,
+    /// Tasks created in the 7 days before that (days 8–14 ago), for week-over-week trend.
+    pub created_prev_7_days: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,12 +125,20 @@ async fn get_client_stats(pool: &PgPool) -> Result<ClientStats, AppError> {
     .await
     .unwrap_or(0);
 
+    let pipeline_open: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM clients WHERE status IN ('prospect', 'active')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
     Ok(ClientStats {
         total,
         active,
         inactive,
         new_this_week,
         new_this_month,
+        pipeline_open,
     })
 }
 
@@ -185,6 +199,20 @@ async fn get_task_stats(pool: &PgPool) -> Result<TaskStats, AppError> {
     .await
     .unwrap_or(0);
 
+    let created_last_7_days: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks WHERE created_at >= NOW() - INTERVAL '7 days'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    let created_prev_7_days: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks WHERE created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
     Ok(TaskStats {
         total,
         completed,
@@ -194,6 +222,8 @@ async fn get_task_stats(pool: &PgPool) -> Result<TaskStats, AppError> {
         overdue,
         due_today,
         due_this_week,
+        created_last_7_days,
+        created_prev_7_days,
     })
 }
 

@@ -1,5 +1,6 @@
-import { Component, createSignal, Show, JSX } from 'solid-js';
+import { Component, createEffect, createSignal, Show, JSX } from 'solid-js';
 import { A, useLocation } from '@solidjs/router';
+import AppShellHeader from './AppShellHeader';
 import ToastContainer from './ToastContainer';
 
 const IconDashboard = () => (
@@ -47,6 +48,35 @@ function pathActive(pathname: string, href: string): boolean {
 const Layout: Component<{ children?: JSX.Element }> = (props) => {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = createSignal(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
+
+  createEffect(() => {
+    // Smart collapse: respect persisted preference; otherwise collapse on smaller desktops.
+    try {
+      const raw = localStorage.getItem('ui.sidebarCollapsed');
+      if (raw === 'true' || raw === 'false') {
+        setSidebarCollapsed(raw === 'true');
+        return;
+      }
+      if (typeof window !== 'undefined') {
+        setSidebarCollapsed(window.innerWidth < 1200);
+      }
+    } catch {
+      // ignore (SSR / privacy mode)
+    }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('ui.sidebarCollapsed', String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   const navClass = (href: string) => {
     const active = pathActive(location.pathname, href);
@@ -60,42 +90,55 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
 
   const SidebarInner = () => (
     <>
-      <div class="mb-6">
-        <A href="/" class="block no-underline group" onClick={() => setMobileOpen(false)}>
+      <div class="mb-6 flex items-start justify-between gap-2">
+        <A href="/" class="block no-underline group" onClick={() => setMobileOpen(false)} title="Ledger CRM">
           <div class="font-heading font-black text-lg uppercase tracking-tight text-black leading-tight">
-            LEDGER CRM
+            <Show when={!sidebarCollapsed()} fallback="LEDGER">
+              LEDGER CRM
+            </Show>
           </div>
-          <div class="font-heading text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-darkGray mt-1">
-            Industrial v1.0
-          </div>
+          <Show when={!sidebarCollapsed()}>
+            <div class="font-heading text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-darkGray mt-1">
+              Industrial v1.0
+            </div>
+          </Show>
         </A>
+
+        <button
+          type="button"
+          class="hidden lg:inline-flex h-10 w-10 items-center justify-center border-3 border-black bg-white font-heading font-black shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5"
+          onClick={toggleSidebar}
+          aria-label={sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {sidebarCollapsed() ? '»' : '«'}
+        </button>
       </div>
 
-      <A
-        href="/tasks/new"
-        class="mb-8 flex items-center justify-center gap-2 border-3 border-black bg-ledger-lime px-4 py-3 font-heading font-black text-sm uppercase tracking-wide text-black shadow-brutal no-underline transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0 active:translate-y-0"
-        onClick={() => setMobileOpen(false)}
-      >
-        <span class="text-lg leading-none">+</span>
-        <span>New Task</span>
-      </A>
-
       <nav class="flex flex-col gap-2">
-        <A href="/" class={navClass('/')} onClick={() => setMobileOpen(false)}>
+        <A href="/" class={navClass('/')} onClick={() => setMobileOpen(false)} title="Dashboard">
           <IconDashboard />
-          <span>Dashboard</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Dashboard</span>
+          </Show>
         </A>
-        <A href="/clients" class={navClass('/clients')} onClick={() => setMobileOpen(false)}>
+        <A href="/clients" class={navClass('/clients')} onClick={() => setMobileOpen(false)} title="Clients">
           <IconClients />
-          <span>Clients</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Clients</span>
+          </Show>
         </A>
-        <A href="/tasks" class={navClass('/tasks')} onClick={() => setMobileOpen(false)}>
+        <A href="/tasks" class={navClass('/tasks')} onClick={() => setMobileOpen(false)} title="Tasks">
           <IconTasks />
-          <span>Tasks</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Tasks</span>
+          </Show>
         </A>
-        <A href="/reports" class={navClass('/reports')} onClick={() => setMobileOpen(false)}>
+        <A href="/reports" class={navClass('/reports')} onClick={() => setMobileOpen(false)} title="Reports">
           <IconReports />
-          <span>Reports</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Reports</span>
+          </Show>
         </A>
       </nav>
 
@@ -104,43 +147,70 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
           href="/notifications"
           class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline hover:bg-ledger-pale border-2 border-transparent hover:border-black"
           onClick={() => setMobileOpen(false)}
+          title="Alerts"
         >
           <span class="text-base" aria-hidden="true">
             🔔
           </span>
-          <span>Alerts</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Alerts</span>
+          </Show>
         </A>
         <A
           href="/files"
           class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline hover:bg-ledger-pale border-2 border-transparent hover:border-black"
           onClick={() => setMobileOpen(false)}
+          title="Files"
         >
           <span class="text-base" aria-hidden="true">
             📁
           </span>
-          <span>Files</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Files</span>
+          </Show>
         </A>
       </div>
 
       <div class="flex-1 min-h-4" />
+
+      <A
+        href="/tasks/new"
+        class={[
+          'mb-4 flex items-center justify-center gap-2 border-3 border-black bg-ledger-lime px-4 py-3 font-heading font-black text-sm uppercase tracking-wide text-black shadow-brutal no-underline transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0 active:translate-y-0',
+          sidebarCollapsed() ? '!px-2' : '',
+        ].join(' ')}
+        onClick={() => setMobileOpen(false)}
+        title="New Task"
+      >
+        <span class="text-lg leading-none">+</span>
+        <Show when={!sidebarCollapsed()}>
+          <span>New Task</span>
+        </Show>
+      </A>
 
       <div class="border-t-3 border-black pt-4 flex flex-col gap-2">
         <A
           href="/profile"
           class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline border-3 border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm"
           onClick={() => setMobileOpen(false)}
+          title="Settings"
         >
           <IconSettings />
-          <span>Settings</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Settings</span>
+          </Show>
         </A>
         <a
           href="https://github.com"
           target="_blank"
           rel="noopener noreferrer"
           class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline border-3 border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm"
+          title="Support"
         >
           <IconSupport />
-          <span>Support</span>
+          <Show when={!sidebarCollapsed()}>
+            <span>Support</span>
+          </Show>
         </a>
       </div>
     </>
@@ -150,7 +220,12 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
     <div class="min-h-screen flex flex-col bg-background font-body text-black">
       <div class="flex flex-1 min-h-0">
         {/* Desktop sidebar */}
-        <aside class="hidden lg:flex w-[260px] shrink-0 flex-col border-r-[3px] border-black bg-background px-4 py-6">
+        <aside
+          class={[
+            'hidden lg:flex shrink-0 flex-col border-r-[3px] border-black bg-background py-6 transition-[width] duration-150',
+            sidebarCollapsed() ? 'w-[88px] px-3' : 'w-[260px] px-4',
+          ].join(' ')}
+        >
           <SidebarInner />
         </aside>
 
@@ -173,7 +248,8 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
           </aside>
         </Show>
 
-        <div class="flex min-w-0 flex-1 flex-col">
+        <div class="flex min-w-0 flex-1 flex-col min-h-0">
+          <AppShellHeader />
           <div class="flex items-center gap-3 border-b-[3px] border-black bg-background px-4 py-3 lg:hidden">
             <button
               type="button"
@@ -195,7 +271,7 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
           <div class="font-body text-xs sm:text-sm">
             <span class="text-white/90">© 2026 Industrial Ledger CRM</span>
             <span class="mx-2 text-white/40">·</span>
-            <span class="font-heading font-bold uppercase text-ledger-lime">System status: optimal</span>
+            <span class="font-heading font-bold uppercase tracking-wide text-white/80">Built with precision</span>
           </div>
           <div class="flex flex-wrap gap-x-4 gap-y-1 font-heading text-[10px] font-bold uppercase tracking-wider sm:text-xs">
             <a href="/files" class="text-white/90 hover:text-ledger-lime no-underline">

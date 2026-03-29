@@ -20,6 +20,7 @@ use crate::domains::tasks::{
 };
 use crate::error::{AppError, AppResult};
 use crate::models::Task;
+use crate::utils::pagination::PaginatedResponse;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskPayload {
@@ -97,7 +98,7 @@ pub async fn list_tasks(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(params): Query<ListTasksParams>,
-) -> AppResult<Json<Vec<Task>>> {
+) -> AppResult<Json<PaginatedResponse<Task>>> {
     let query = ListTasksQuery {
         status: params.status.clone(),
         assigned_to: params.assigned_to.clone(),
@@ -111,11 +112,14 @@ pub async fn list_tasks(
         actor_user_id: actor_id,
     };
     let handler = Arc::new(ListTasksHandler::new(state.pool.clone()));
-    let tasks = state
+    let result = state
         .query_bus
         .dispatch_with_handler(query, handler)
         .await?;
-    Ok(Json(tasks))
+    let limit = params.limit.unwrap_or(50).max(1);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let page = (offset / limit) + 1;
+    Ok(Json(PaginatedResponse::new(result.tasks, page, limit, result.total)))
 }
 
 pub async fn get_task(

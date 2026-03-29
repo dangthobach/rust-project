@@ -6,9 +6,10 @@ use lapin::{
     Connection, ConnectionProperties, ExchangeKind,
 };
 use serde::Deserialize;
+use sqlx::{PgPool, QueryBuilder, Postgres};
 
 use crate::app_state::AppState;
-use crate::models::{Client, Task, User};
+use crate::models::{Client, ReportExportJob, Task, User};
 
 #[derive(Debug, Deserialize)]
 struct ReportJob {
@@ -80,6 +81,17 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
 
     let job_id_opt = job.job_id.clone();
 
+    let export_meta: Option<ReportExportJob> = if let Some(ref jid) = job_id_opt {
+        sqlx::query_as::<_, ReportExportJob>("SELECT * FROM report_export_jobs WHERE id = $1")
+            .bind(jid)
+            .fetch_optional(pool)
+            .await?
+    } else {
+        None
+    };
+    let start_date = export_meta.as_ref().and_then(|j| j.start_date);
+    let end_date = export_meta.as_ref().and_then(|j| j.end_date);
+
     if let Some(job_id) = job_id_opt.as_deref() {
         let _ = sqlx::query("UPDATE report_export_jobs SET status = 'processing' WHERE id = $1")
             .bind(job_id)
@@ -91,9 +103,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
         let (content_type, bytes, kind) = match routing_key {
             "report.export.clients" => {
                 let rows: Vec<Client> =
-                    sqlx::query_as("SELECT * FROM clients ORDER BY created_at DESC")
-                        .fetch_all(pool)
-                        .await?;
+                    load_clients_filtered(pool, start_date, end_date).await?;
                 if format == "json" {
                     (
                         "application/json".to_string(),
@@ -118,10 +128,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
                 }
             }
             "report.export.tasks" => {
-                let rows: Vec<Task> =
-                    sqlx::query_as("SELECT * FROM tasks ORDER BY created_at DESC")
-                        .fetch_all(pool)
-                        .await?;
+                let rows: Vec<Task> = load_tasks_filtered(pool, start_date, end_date).await?;
                 if format == "json" {
                     (
                         "application/json".to_string(),
@@ -144,10 +151,7 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
                 }
             }
             "report.export.users" => {
-                let rows: Vec<User> =
-                    sqlx::query_as("SELECT * FROM users ORDER BY created_at DESC")
-                        .fetch_all(pool)
-                        .await?;
+                let rows: Vec<User> = load_users_filtered(pool, start_date, end_date).await?;
                 if format == "json" {
                     (
                         "application/json".to_string(),
@@ -245,4 +249,59 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
     }
 
     res
+}
+
+async fn load_clients_filtered(
+    pool: &PgPool,
+    start: Option<chrono::NaiveDate>,
+    end: Option<chrono::NaiveDate>,
+) -> Result<Vec<Client>, sqlx::Error> {
+    let mut qb: QueryBuilder<Postgres> =
+        QueryBuilder::new("SELECT * FROM clients WHERE 1=1");
+    if let Some(sd) = start {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date >= ")
+            .push_bind(sd);
+    }
+    if let Some(ed) = end {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date <= ")
+            .push_bind(ed);
+    }
+    qb.push(" ORDER BY created_at DESC");
+    qb.build_query_as::<Client>().fetch_all(pool).await
+}
+
+async fn load_tasks_filtered(
+    pool: &PgPool,
+    start: Option<chrono::NaiveDate>,
+    end: Option<chrono::NaiveDate>,
+) -> Result<Vec<Task>, sqlx::Error> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM tasks WHERE 1=1");
+    if let Some(sd) = start {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date >= ")
+            .push_bind(sd);
+    }
+    if let Some(ed) = end {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date <= ")
+            .push_bind(ed);
+    }
+    qb.push(" ORDER BY created_at DESC");
+    qb.build_query_as::<Task>().fetch_all(pool).await
+}
+
+async fn load_users_filtered(
+    pool: &PgPool,
+    start: Option<chrono::NaiveDate>,
+    end: Option<chrono::NaiveDate>,
+) -> Result<Vec<User>, sqlx::Error> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users WHERE 1=1");
+    if let Some(sd) = start {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date >= ")
+            .push_bind(sd);
+    }
+    if let Some(ed) = end {
+        qb.push(" AND (created_at AT TIME ZONE 'UTC')::date <= ")
+            .push_bind(ed);
+    }
+    qb.push(" ORDER BY created_at DESC");
+    qb.build_query_as::<User>().fetch_all(pool).await
 }

@@ -6,6 +6,7 @@ pub mod state;
 // Re-export specific handlers that are used
 pub use command_handlers::{
     CreateFileHandler, CreateFolderHandler, DeleteFileHandler, MoveFileHandler, RenameFileHandler,
+    SetFilePermissionsHandler,
 };
 pub use query_handlers::{
     GetFileHandler, ListFilesHandler, GetFolderTreeHandler, SearchFilesHandler,

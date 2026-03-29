@@ -27,6 +27,10 @@ impl FileSystemService {
         }
     }
 
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     /// Calculate path from parent
     pub async fn calculate_path(
         &self,

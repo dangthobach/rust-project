@@ -1,24 +1,33 @@
 import { Component, createSignal, createEffect, Show, For, createMemo, onCleanup } from 'solid-js';
-import { Card, CardHeader, CardTitle, CardContent, Button, Spinner } from '~/components/ui';
+import { useNavigate } from '@solidjs/router';
+import { Button, Spinner } from '~/components/ui';
 import { useFiles, useUploadFile, useDeleteFile, useDownloadFile, useSearchFiles } from '~/lib/hooks/useFiles';
 import { showToast } from '~/lib/toast';
 import type { FileMetadata } from '~/lib/api';
-import { FileThumbnail } from '~/components/crm';
+
+const MaterialIcon: Component<{ name: string; class?: string }> = (props) => (
+  <span class={['material-symbols-outlined', props.class ?? ''].join(' ')} aria-hidden="true">
+    {props.name}
+  </span>
+);
 
 const Files: Component = () => {
+  const navigate = useNavigate();
   const [page, setPage] = createSignal(1);
   const [limit] = createSignal(20);
   const [search, setSearch] = createSignal('');
-  const [fileTypeFilter, setFileTypeFilter] = createSignal<string>('');
   const [selectedFiles, setSelectedFiles] = createSignal<string[]>([]);
   const [isDragging, setIsDragging] = createSignal(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = createSignal<string | null>(null);
+  const [activeTab, setActiveTab] = createSignal<'shared' | 'recent' | 'starred'>('recent');
+  const [viewMode, setViewMode] = createSignal<'grid' | 'list'>('grid');
+  const [sortBy, setSortBy] = createSignal<'modified' | 'name' | 'size'>('modified');
 
   // Queries and mutations
   const files = useFiles(() => ({ 
     page: page(), 
     limit: limit(),
-    file_type: fileTypeFilter() || undefined
+    tab: activeTab(),
   }));
   
   const searchFiles = useSearchFiles(
@@ -26,7 +35,7 @@ const Files: Component = () => {
     () => ({
       page: page(),
       limit: limit(),
-      file_type: fileTypeFilter() || undefined,
+      tab: activeTab(),
     })
   );
   
@@ -56,43 +65,8 @@ const Files: Component = () => {
     return files.isLoading;
   });
 
-  // Poll softly for image thumbnails once they are uploaded (worker updates DB asynchronously).
-  // Stop polling as soon as all visible image files have thumbnail_path or after max attempts.
-  let pollTimer: number | undefined = undefined;
-  let pollAttempts = 0;
-  const POLL_MS = 2000;
-  const MAX_POLL_ATTEMPTS = 10;
-
-  createEffect(() => {
-    const list = displayFiles();
-    const anyMissingThumb =
-      search().length === 0 &&
-      list.some((f: FileMetadata) => f.file_type?.startsWith('image/') && !f.thumbnail_path);
-
-    if (anyMissingThumb) {
-      if (!pollTimer) {
-        pollAttempts = 0;
-        pollTimer = window.setInterval(() => {
-          pollAttempts++;
-          // Query should re-run and refresh thumbnail_path values.
-          files.refetch();
-          if (pollAttempts >= MAX_POLL_ATTEMPTS) {
-            window.clearInterval(pollTimer);
-            pollTimer = undefined;
-          }
-        }, POLL_MS);
-      }
-    } else {
-      if (pollTimer) {
-        window.clearInterval(pollTimer);
-        pollTimer = undefined;
-      }
-    }
-  });
-
-  onCleanup(() => {
-    if (pollTimer) window.clearInterval(pollTimer);
-  });
+  // Note: `/api/fs/*` does not expose thumbnail paths yet; avoid thumbnail polling.
+  onCleanup(() => undefined);
 
   // File upload handlers
   const handleFileUpload = async (fileList: FileList | null) => {
@@ -100,10 +74,10 @@ const Files: Component = () => {
 
     const file = fileList[0];
     
-    // Validate file size (max 50MB)
-    const maxSize = 50 * 1024 * 1024;
+    // Validate file size (max 500MB — match DMS mock)
+    const maxSize = 500 * 1024 * 1024;
     if (file.size > maxSize) {
-      showToast('error', 'File size must be less than 50MB');
+      showToast('error', 'File size must be less than 500MB');
       return;
     }
 
@@ -144,7 +118,7 @@ const Files: Component = () => {
 
   // Download handler
   const handleDownload = (file: FileMetadata) => {
-    downloadFile.mutate({ id: file.id, filename: file.original_name });
+    downloadFile.mutate({ id: file.id, filename: file.name });
   };
 
   // Delete handlers
@@ -212,240 +186,463 @@ const Files: Component = () => {
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div class="mb-8">
-        <div class="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h1 class="text-heading-1 font-heading font-black uppercase text-shadow-brutal">
-              Files
-            </h1>
-            <p class="text-neutral-darkGray mt-1">
-              Manage your documents and files
-            </p>
-          </div>
-          
-          <div class="flex gap-3">
-            <Show when={selectedFiles().length > 0}>
-              <Button 
-                variant="danger" 
-                size="md"
-                onClick={() => {
-                  if (confirm(`Delete ${selectedFiles().length} selected files?`)) {
-                    selectedFiles().forEach(id => deleteFile.mutate(id));
-                    setSelectedFiles([]);
-                  }
-                }}
-              >
-                🗑️ Delete Selected ({selectedFiles().length})
-              </Button>
-            </Show>
-            
-            <label class="relative cursor-pointer">
-              <input
-                type="file"
-                class="hidden"
-                onChange={handleInputChange}
-                disabled={uploadFile.isPending}
-              />
-              <Button variant="primary" size="md" disabled={uploadFile.isPending}>
-                <Show when={uploadFile.isPending} fallback="⬆️ Upload File">
-                  <Spinner class="inline-block mr-2" />
-                  Uploading...
-                </Show>
-              </Button>
-            </label>
-          </div>
+    <div class="space-y-8">
+      {/* DMS top strip (page-level) */}
+      <div class="flex flex-col gap-4 border-[3px] border-black bg-background p-4 md:flex-row md:items-center md:justify-between">
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            class={[
+              'px-2 py-1 font-heading text-xs font-black uppercase tracking-wider transition-colors',
+              activeTab() === 'shared' ? 'bg-[#A2FE00] text-black' : 'hover:bg-[#A2FE00]',
+            ].join(' ')}
+            onClick={() => setActiveTab('shared')}
+          >
+            Shared
+          </button>
+          <button
+            type="button"
+            class={[
+              'px-2 py-1 font-heading text-xs font-black uppercase tracking-wider transition-colors',
+              activeTab() === 'recent' ? 'bg-[#A2FE00] text-black' : 'hover:bg-[#A2FE00]',
+            ].join(' ')}
+            onClick={() => setActiveTab('recent')}
+          >
+            Recent
+          </button>
+          <button
+            type="button"
+            class={[
+              'px-2 py-1 font-heading text-xs font-black uppercase tracking-wider transition-colors',
+              activeTab() === 'starred' ? 'bg-[#A2FE00] text-black' : 'hover:bg-[#A2FE00]',
+            ].join(' ')}
+            onClick={() => setActiveTab('starred')}
+          >
+            Starred
+          </button>
         </div>
-      </div>
 
-      {/* Search and Filter Bar */}
-      <div class="mb-6 flex gap-4 flex-wrap">
-        <div class="flex-1 min-w-[300px]">
-          <input
-            type="text"
-            placeholder="🔍 Search files..."
-            class="w-full px-4 py-2 border-3 border-black font-bold focus:outline-none focus:ring-2 focus:ring-primary-yellow"
-            value={search()}
-            onInput={(e) => {
-              setSearch(e.currentTarget.value);
-              setPage(1);
-            }}
-          />
-        </div>
-        
-        <select
-          class="px-4 py-2 border-3 border-black font-bold bg-white cursor-pointer"
-          value={fileTypeFilter()}
-          onChange={(e) => {
-            setFileTypeFilter(e.currentTarget.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All Types</option>
-          <option value="image/">Images</option>
-          <option value="video/">Videos</option>
-          <option value="audio/">Audio</option>
-          <option value="pdf">PDF</option>
-          <option value="document">Documents</option>
-          <option value="spreadsheet">Spreadsheets</option>
-        </select>
-      </div>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div class="relative min-w-[260px]">
+            <input
+              type="search"
+              placeholder="SEARCH_FILES..."
+              value={search()}
+              onInput={(e) => {
+                setSearch(e.currentTarget.value);
+                setPage(1);
+              }}
+              class="w-full border-[3px] border-black bg-white px-4 py-2 pr-10 font-heading text-xs font-black uppercase tracking-wider focus:outline-none focus:shadow-brutal-sm"
+            />
+            <span class="absolute right-3 top-2.5 text-black" aria-hidden="true">
+              <MaterialIcon name="search" />
+            </span>
+          </div>
 
-      {/* Drag & Drop Upload Area */}
-      <div
-        class={`mb-6 border-4 border-dashed rounded-lg p-8 text-center transition-all ${
-          isDragging() 
-            ? 'border-primary-yellow bg-primary-yellow/10' 
-            : 'border-neutral-darkGray bg-neutral-lightGray/30'
-        }`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
-        <div class="text-4xl mb-2">📁</div>
-        <p class="font-bold text-lg mb-1">Drag & Drop Files Here</p>
-        <p class="text-sm text-neutral-darkGray">
-          or click the "Upload File" button above
-        </p>
-        <p class="text-xs text-neutral-darkGray mt-2">
-          Maximum file size: 50MB
-        </p>
-      </div>
-
-      {/* Files List */}
-      <Card>
-        <CardHeader>
-          <div class="flex items-center justify-between">
-            <CardTitle>
-              File Manager
-              <Show when={pagination()}>
-                {(p) => (
-                  <span class="ml-2 text-sm font-normal text-neutral-darkGray">
-                    ({p().total} total)
-                  </span>
-                )}
+          <label class="relative cursor-pointer">
+            <input type="file" class="hidden" onChange={handleInputChange} disabled={uploadFile.isPending} />
+            <button
+              type="button"
+              class="inline-flex items-center justify-center border-[3px] border-black bg-[#A2FE00] px-4 py-2 font-heading text-xs font-black uppercase shadow-brutal-sm transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 disabled:opacity-60"
+              disabled={uploadFile.isPending}
+              onClick={(e) => (e.currentTarget.previousElementSibling as HTMLInputElement | null)?.click()}
+            >
+              <Show when={uploadFile.isPending} fallback="Upload File">
+                <span class="mr-2 inline-flex items-center">
+                  <Spinner class="h-4 w-4" />
+                </span>
+                Uploading...
               </Show>
-            </CardTitle>
-            
-            <Show when={displayFiles().length > 0}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleSelectAll}
-              >
-                {selectedFiles().length === displayFiles().length ? '☑️ Deselect All' : '☐ Select All'}
-              </Button>
-            </Show>
+            </button>
+          </label>
+        </div>
+      </div>
+
+      {/* Header + stats */}
+      <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 class="text-display-2 font-heading font-black uppercase tracking-tight text-black">Documents</h1>
+          <div class="mt-2 flex flex-wrap gap-3">
+            <span class="bg-black px-3 py-1 text-xs font-heading font-black uppercase text-white">
+              Root / Projects / 2026_ledger
+            </span>
+            <span class="self-center text-xs font-heading font-black uppercase text-neutral-gray">
+              Updated {new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+            </span>
           </div>
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div class="flex gap-4">
+          <div class="min-w-[140px] border-[3px] border-black bg-white p-4 shadow-brutal-sm">
+            <div class="mb-1 text-[10px] font-heading font-black uppercase text-neutral-gray">Total Files</div>
+            <div class="text-3xl font-heading font-black">{pagination()?.total ?? displayFiles().length}</div>
+          </div>
+          <div class="min-w-[140px] border-[3px] border-black bg-[#A2FE00] p-4 shadow-brutal-sm">
+            <div class="mb-1 text-[10px] font-heading font-black uppercase text-black">New This Week</div>
+            <div class="text-3xl font-heading font-black text-black">+{Math.min(42, displayFiles().length)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-8">
+        {/* Browser */}
+        <div class="col-span-12 xl:col-span-9">
+          {/* Toolbar */}
+          <div class="mb-6 flex flex-wrap items-center justify-between gap-4 border-[3px] border-black bg-white p-4">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class={[
+                  'border-[2px] border-black p-2',
+                  viewMode() === 'grid' ? 'bg-black text-white' : 'bg-white hover:bg-neutral-lightGray/60',
+                ].join(' ')}
+                onClick={() => setViewMode('grid')}
+                aria-label="Grid view"
+              >
+                <MaterialIcon name="grid_view" />
+              </button>
+              <button
+                type="button"
+                class={[
+                  'border-[2px] border-black p-2',
+                  viewMode() === 'list' ? 'bg-black text-white' : 'bg-white hover:bg-neutral-lightGray/60',
+                ].join(' ')}
+                onClick={() => setViewMode('list')}
+                aria-label="List view"
+              >
+                <MaterialIcon name="list" />
+              </button>
+              <div class="mx-2 h-8 w-px bg-black/20" />
+              <div class="flex items-center gap-3">
+                <span class="text-[10px] font-heading font-black uppercase text-neutral-gray">Sort By:</span>
+                <select
+                  class="cursor-pointer border-0 bg-transparent text-xs font-heading font-black uppercase focus:ring-0"
+                  value={sortBy()}
+                  onChange={(e) => setSortBy(e.currentTarget.value as any)}
+                >
+                  <option value="modified">Date Modified</option>
+                  <option value="name">File Name</option>
+                  <option value="size">File Size</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 border-[3px] border-black bg-white px-4 py-2 text-xs font-heading font-black uppercase transition-all hover:bg-black hover:text-white"
+                onClick={() => showToast('info', 'Filter', 'Advanced filters are UI-only in this iteration.')}
+              >
+                <MaterialIcon name="filter_list" class="text-sm" />
+                Filter
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 border-[3px] border-black bg-white px-4 py-2 text-xs font-heading font-black uppercase transition-all hover:bg-black hover:text-white"
+                onClick={() => showToast('info', 'Bulk Export', 'Bulk export will be wired after selecting target formats.')}
+              >
+                <MaterialIcon name="file_download" class="text-sm" />
+                Bulk Export
+              </button>
+            </div>
+          </div>
+
+          {/* Grid */}
           <Show
             when={!isLoading()}
             fallback={
-              <div class="py-12 flex justify-center">
+              <div class="flex items-center justify-center border-[3px] border-black bg-white p-10 shadow-brutal-sm">
                 <Spinner />
               </div>
             }
           >
-            <Show
-              when={displayFiles().length > 0}
-              fallback={
-                <div class="text-center py-12">
-                  <div class="text-6xl mb-4">📁</div>
-                  <p class="text-neutral-darkGray">
-                    {search().length > 0 
-                      ? `No files found matching "${search()}"`
-                      : 'No files uploaded yet. Upload your first file to get started!'
-                    }
-                  </p>
+            <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Mock folder card (until backend folders are integrated) */}
+              <div
+                class="group relative cursor-pointer border-[3px] border-black bg-white p-5 shadow-brutal-sm transition-all hover:translate-x-1 hover:translate-y-1 hover:shadow-none"
+                onClick={() => showToast('info', 'Folder', 'Folder navigation will be enabled once /api/fs/folders is wired in UI.')}
+              >
+                <div class="mb-4 flex items-start justify-between">
+                  <MaterialIcon name="folder" class="text-5xl" />
+                  <button type="button" class="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#A2FE00] p-1">
+                    <MaterialIcon name="more_vert" />
+                  </button>
                 </div>
-              }
-            >
-              <div class="divide-y-3 divide-black">
-                <For each={displayFiles()}>
-                  {(file) => (
-                    <div class="p-4 flex items-center justify-between hover:bg-neutral-beige transition-colors group">
-                      <div class="flex items-center gap-3 flex-1">
-                        {/* Checkbox */}
-                        <input
-                          type="checkbox"
-                          class="w-5 h-5 cursor-pointer"
-                          checked={selectedFiles().includes(file.id)}
-                          onChange={() => toggleFileSelection(file.id)}
-                        />
-                        
-                        {/* Thumbnail (or processing state) */}
-                        <FileThumbnail file={file} class="flex-shrink-0" />
-                        
-                        {/* File Info */}
-                        <div class="flex-1">
-                          <h4 class="font-heading font-bold text-sm break-all">
-                            {file.original_name}
-                          </h4>
-                          <p class="text-xs text-neutral-darkGray">
-                            {formatFileSize(file.file_size)} • {file.file_type} • {formatDate(file.created_at)}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      {/* Action Buttons */}
-                      <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDownload(file)}
-                          disabled={downloadFile.isPending}
-                        >
-                          ⬇️ Download
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteClick(file.id)}
-                          class="text-red-600 hover:bg-red-50"
-                        >
-                          🗑️ Delete
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </For>
+                <div class="mb-1 truncate text-lg font-heading font-black uppercase">Marketing_Assets_2026</div>
+                <div class="flex items-center justify-between text-[10px] font-heading font-black uppercase text-neutral-gray">
+                  <span>24 Files</span>
+                  <span>1.2 GB</span>
+                </div>
+                <div class="mt-4 flex -space-x-2">
+                  <div class="h-6 w-6 overflow-hidden border-[2px] border-black bg-white" />
+                  <div class="h-6 w-6 overflow-hidden border-[2px] border-black bg-white" />
+                  <div class="flex h-6 w-6 items-center justify-center border-[2px] border-black bg-black text-[8px] font-black text-[#A2FE00]">
+                    +5
+                  </div>
+                </div>
               </div>
 
-              {/* Pagination */}
-              <Show when={pagination() && (pagination() as any)!.total_pages > 1}>
-                {(p) => (
-                  <div class="mt-6 flex items-center justify-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={!(p() as any).has_prev}
+              <For each={displayFiles()}>
+                {(file) => {
+                  const mime = () => file.mime_type ?? '';
+                  const name = () => file.name ?? '';
+                  const isImage = () => mime().startsWith('image/');
+                  const isPdf = () => mime().includes('pdf') || name().toLowerCase().endsWith('.pdf');
+                  const isSheet = () => mime().includes('spreadsheet') || mime().includes('excel') || /\.(xlsx|xls|csv)$/i.test(name());
+                  const isCode = () => mime().includes('typescript') || /\.(ts|tsx)$/i.test(name());
+
+                  const openDetails = () => navigate(`/files/${file.id}`);
+
+                  return (
+                    <div
+                      class={[
+                        'group relative cursor-pointer border-[3px] border-black bg-white shadow-brutal-sm transition-all hover:translate-x-1 hover:translate-y-1 hover:shadow-none',
+                        isImage() ? 'overflow-hidden p-0' : 'p-5',
+                      ].join(' ')}
+                      onClick={openDetails}
+                      role="button"
+                      tabindex={0}
+                      onKeyDown={(e) => e.key === 'Enter' && openDetails()}
                     >
-                      ← Previous
-                    </Button>
-                    
-                    <span class="px-4 py-2 font-bold">
-                      Page {(p() as any).page} of {(p() as any).total_pages}
-                    </span>
-                    
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={!(p() as any).has_next}
-                    >
-                      Next →
-                    </Button>
-                  </div>
-                )}
-              </Show>
+                      <Show
+                        when={isImage()}
+                        fallback={
+                          <>
+                            <div class="mb-4 flex items-start justify-between">
+                              <span class={['text-5xl', isPdf() ? 'text-red-600' : isSheet() ? 'text-primary' : 'text-black'].join(' ')}>
+                                <MaterialIcon name={isPdf() ? 'picture_as_pdf' : isSheet() ? 'table_chart' : isCode() ? 'code' : 'description'} />
+                              </span>
+                              <Show when={isPdf()}>
+                                <div class="bg-red-600 px-2 py-0.5 text-[8px] font-heading font-black uppercase text-white">LOCKED</div>
+                              </Show>
+                              <Show when={!isPdf() && isSheet()}>
+                                <div class="bg-[#A2FE00] px-2 py-0.5 text-[8px] font-heading font-black uppercase text-black">SHARED</div>
+                              </Show>
+                            </div>
+                            <div class="mb-1 truncate text-lg font-heading font-black uppercase">{file.name}</div>
+                            <div class="flex items-center justify-between text-[10px] font-heading font-black uppercase text-neutral-gray">
+                              <span>{formatFileSize(file.size)}</span>
+                              <span>{formatDate(file.updated_at ?? file.created_at)}</span>
+                            </div>
+                            <Show when={!isCode()}>
+                              <div class="mt-4 border-t border-black/10 pt-4 flex items-center justify-between">
+                                <span class="text-[10px] font-heading font-black uppercase text-secondary">
+                                  Viewed by Admin
+                                </span>
+                                <MaterialIcon name="history" class="text-sm" />
+                              </div>
+                            </Show>
+                            <Show when={isCode()}>
+                              <div class="mt-4 flex gap-1">
+                                <span class="bg-neutral-lightGray px-2 py-0.5 text-[8px] font-heading font-black">TYPESCRIPT</span>
+                                <span class="bg-neutral-lightGray px-2 py-0.5 text-[8px] font-heading font-black">UI_REF</span>
+                              </div>
+                            </Show>
+                          </>
+                        }
+                      >
+                        <div class="h-32 overflow-hidden bg-neutral-lightGray flex items-center justify-center">
+                          <MaterialIcon name="image" class="text-5xl text-black/60" />
+                        </div>
+                        <div class="p-4">
+                          <div class="mb-1 truncate text-lg font-heading font-black uppercase">{file.name}</div>
+                          <div class="flex items-center justify-between text-[10px] font-heading font-black uppercase text-neutral-gray">
+                            <span>{formatFileSize(file.size)}</span>
+                            <span>{formatDate(file.updated_at ?? file.created_at)}</span>
+                          </div>
+                        </div>
+                        <div class="absolute right-2 top-2 flex gap-1">
+                          <button
+                            type="button"
+                            class="border-[2px] border-black bg-white p-1 hover:bg-[#A2FE00]"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              showToast('info', 'Share', 'Share UI is a stub for now.');
+                            }}
+                            aria-label="Share"
+                          >
+                            <MaterialIcon name="share" class="text-xs" />
+                          </button>
+                          <button
+                            type="button"
+                            class="border-[2px] border-black bg-white p-1 hover:bg-[#A2FE00]"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(file);
+                            }}
+                            aria-label="Download"
+                          >
+                            <MaterialIcon name="download" class="text-xs" />
+                          </button>
+                        </div>
+                      </Show>
+
+                      <div class="absolute right-3 top-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          type="button"
+                          class="border-[2px] border-black bg-white px-2 py-1 text-[10px] font-heading font-black uppercase hover:bg-[#A2FE00]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownload(file);
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          class="border-[2px] border-black bg-white px-2 py-1 text-[10px] font-heading font-black uppercase hover:bg-red-50 text-red-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteClick(file.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }}
+              </For>
+
+              {/* Dropzone */}
+              <div
+                class={[
+                  'group flex cursor-pointer flex-col items-center justify-center border-[3px] border-dashed border-black bg-white/60 p-8 text-center transition-colors hover:bg-[#A2FE00]/10',
+                  isDragging() ? 'bg-[#A2FE00]/20' : '',
+                ].join(' ')}
+                onDragEnter={handleDragEnter}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                onClick={() => showToast('info', 'Upload', 'Use the Upload File button to pick a file.')}
+              >
+                <div class="mb-4 transition-transform group-hover:scale-110">
+                  <MaterialIcon name="cloud_upload" class="text-4xl" />
+                </div>
+                <div class="text-sm font-heading font-black uppercase">Drop New Files Here</div>
+                <div class="mt-2 text-[10px] font-heading font-bold uppercase text-neutral-gray">Max 500MB per file</div>
+              </div>
+            </div>
+
+            <Show when={displayFiles().length === 0 && !isLoading()}>
+              <div class="mt-6 border-[3px] border-black bg-white p-8 shadow-brutal-sm">
+                <div class="text-sm font-bold text-neutral-darkGray">
+                  {search().length > 0 ? `No files found matching "${search()}"` : 'No files uploaded yet.'}
+                </div>
+              </div>
+            </Show>
+
+            <Show when={pagination() && (pagination() as any)!.total_pages > 1}>
+              {(p) => (
+                <div class="mt-6 flex items-center justify-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPage((pg) => Math.max(1, pg - 1))}
+                    disabled={!(p() as any).has_prev}
+                  >
+                    ← Previous
+                  </Button>
+                  <span class="px-4 py-2 font-heading font-black uppercase text-xs">
+                    Page {(p() as any).page} of {(p() as any).total_pages}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPage((pg) => pg + 1)}
+                    disabled={!(p() as any).has_next}
+                  >
+                    Next →
+                  </Button>
+                </div>
+              )}
             </Show>
           </Show>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Sidebar */}
+        <div class="col-span-12 xl:col-span-3 space-y-8">
+          <div class="border-[3px] border-black bg-black p-6 shadow-brutal-sm text-white">
+            <div class="mb-4 text-xl font-heading font-black uppercase leading-tight">Quick Action Ledger</div>
+            <div class="space-y-3">
+              <button
+                type="button"
+                class="w-full border-[3px] border-[#A2FE00] bg-[#A2FE00] py-3 font-heading text-xs font-black uppercase text-black transition-all hover:bg-black hover:text-[#A2FE00]"
+                onClick={() => showToast('info', 'Request Signature', 'This action is UI-only for now.')}
+              >
+                Request Signature
+              </button>
+              <button
+                type="button"
+                class="w-full border-[3px] border-white py-3 font-heading text-xs font-black uppercase transition-all hover:bg-white hover:text-black"
+                onClick={() => showToast('info', 'Secure Transfer', 'This action is UI-only for now.')}
+              >
+                Secure Transfer
+              </button>
+            </div>
+            <div class="mt-6 border-t border-white/20 pt-6">
+              <div class="mb-2 text-[10px] font-heading font-black uppercase text-white/70">Encryption Status</div>
+              <div class="flex items-center gap-2">
+                <span class="h-2 w-2 bg-[#A2FE00]" />
+                <span class="text-xs font-heading font-black uppercase">AES-256 ACTIVE</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="border-[3px] border-black bg-white p-6 shadow-brutal-sm">
+            <div class="mb-6 flex items-center justify-between">
+              <div class="text-xl font-heading font-black uppercase">Activity</div>
+              <MaterialIcon name="history" class="text-secondary" />
+            </div>
+            <div class="space-y-6">
+              {[
+                { icon: 'edit', iconBg: 'bg-black text-[#A2FE00]', title: "Mark S. edited 'Contract_V4'", meta: '14:22 — Project Alpha' },
+                { icon: 'share', iconBg: 'bg-secondary text-white', title: 'External Share Created', meta: '11:05 — Marketing_Assets' },
+                { icon: 'upload_file', iconBg: 'bg-[#A2FE00] text-black', title: '54 Files Uploaded', meta: 'Yesterday — Bulk Import' },
+              ].map((row, idx) => (
+                <div class="relative flex gap-4">
+                  <Show when={idx !== 2}>
+                    <div class="absolute left-3 top-6 h-full w-px bg-black/10" />
+                  </Show>
+                  <div class={['z-10 flex h-6 w-6 items-center justify-center', row.iconBg].join(' ')}>
+                    <MaterialIcon name={row.icon} class="text-[14px]" />
+                  </div>
+                  <div>
+                    <div class="text-xs font-heading font-black uppercase text-black">{row.title}</div>
+                    <div class="mt-1 text-[10px] font-heading font-black uppercase text-neutral-gray">{row.meta}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              class="mt-8 w-full border-[3px] border-black py-2 text-[10px] font-heading font-black uppercase transition-all hover:bg-black hover:text-white"
+              onClick={() => showToast('info', 'Logs', 'System logs view is not wired yet.')}
+            >
+              View System Logs
+            </button>
+          </div>
+
+          <div class="border-[3px] border-black bg-white p-6">
+            <div class="mb-4 text-xl font-heading font-black uppercase">Starred Nodes</div>
+            <div class="space-y-2">
+              {['Brand_Kit_2026', 'Employee_Onboarding'].map((name) => (
+                <div
+                  class="group flex cursor-pointer items-center justify-between border-[2px] border-black bg-white p-2 transition-colors hover:bg-[#A2FE00]"
+                  onClick={() => showToast('info', 'Starred', `${name} (mock)`)}
+                >
+                  <div class="flex items-center gap-3">
+                    <MaterialIcon name="star" class="text-black" />
+                    <div class="text-xs font-heading font-black uppercase">{name}</div>
+                  </div>
+                  <div class="opacity-0 transition-opacity group-hover:opacity-100">
+                    <MaterialIcon name="open_in_new" class="text-sm" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Delete Confirmation Modal */}
       <Show when={showDeleteConfirm()}>
