@@ -1,8 +1,10 @@
 use axum::{
+    body::Body,
     extract::Multipart,
     extract::{Path, Query, State},
+    http::{header, HeaderMap, HeaderValue},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json, Response},
     Extension,
 };
 use serde::Deserialize;
@@ -22,6 +24,9 @@ use crate::domains::file_system::queries::{
 use crate::domains::file_system::read_models::{FileView, FolderTreeView};
 use crate::error::{AppError, AppResult};
 use crate::utils::file_validator;
+use tokio_util::io::ReaderStream;
+use tokio::fs;
+use futures_util::TryStreamExt;
 
 #[derive(Debug, Deserialize)]
 pub struct FsPaginationQuery {
@@ -108,6 +113,21 @@ fn normalize_tab(raw: Option<String>) -> String {
         Some("starred") => "starred".to_string(),
         _ => "recent".to_string(),
     }
+}
+
+fn content_disposition_attachment(original_name: &str) -> HeaderValue {
+    let safe: String = original_name
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n') && !c.is_control())
+        .take(200)
+        .collect();
+    let safe = if safe.trim().is_empty() {
+        "download".to_string()
+    } else {
+        safe
+    };
+    let s = format!("attachment; filename=\"{}\"", safe);
+    HeaderValue::from_str(&s).unwrap_or_else(|_| HeaderValue::from_static("attachment"))
 }
 
 pub async fn create_file(
@@ -999,4 +1019,94 @@ pub async fn get_download_url_fs(
     Err(AppError::BadRequest(
         "Current storage backend does not support pre-signed URL".to_string(),
     ))
+}
+
+/// Stream/proxy the binary file for a FS file.
+/// - For local storage (path on disk): stream via tokio fs.
+/// - For rustfs:// uri: presign and proxy via reqwest streaming.
+pub async fn download_file_fs(
+    Extension(actor_id): Extension<String>,
+    State(state): State<AppState>,
+    Path(file_id): Path<String>,
+) -> AppResult<Response> {
+    let file_uuid = parse_uuid(&file_id, "file_id")?;
+    let user_uuid = parse_uuid(&actor_id, "actor_id")?;
+    let svc = fs_state(&state).service;
+    let ok = svc
+        .check_permission(file_uuid, user_uuid, crate::core::shared::Permission::Read)
+        .await
+        .unwrap_or(false);
+    if !ok {
+        return Err(AppError::NotFound("File not found".to_string()));
+    }
+
+    // Resolve storage file info.
+    let storage_file_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT storage_file_id FROM file_views WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(file_uuid)
+    .fetch_optional(state.pool())
+    .await?;
+    let Some(storage_id) = storage_file_id else {
+        return Err(AppError::NotFound("No binary linked to this file".to_string()));
+    };
+
+    let rec: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT file_path, COALESCE(file_type,'application/octet-stream') AS file_type, original_name FROM files WHERE id = $1",
+    )
+    .bind(storage_id)
+    .fetch_optional(state.pool())
+    .await?;
+    let Some((file_path, file_type, original_name)) = rec else {
+        return Err(AppError::NotFound("Binary not found".to_string()));
+    };
+
+    let mut headers = HeaderMap::new();
+    if let Ok(ct) = HeaderValue::from_str(&file_type) {
+        headers.insert(header::CONTENT_TYPE, ct);
+    } else {
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+    }
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        content_disposition_attachment(original_name.as_deref().unwrap_or("download")),
+    );
+
+    // rustfs: presign then proxy stream
+    if file_path.starts_with("rustfs://") {
+        let signed = state
+            .object_storage
+            .presign_get_url(&file_path, 900)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("presign failed: {e}")))?;
+        let Some(url) = signed else {
+            return Err(AppError::BadRequest(
+                "Current storage backend does not support pre-signed URL".to_string(),
+            ));
+        };
+
+        let resp = reqwest::get(url)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("proxy fetch failed: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(AppError::NotFound("File not found".to_string()));
+        }
+        let stream = resp
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let body = Body::from_stream(stream);
+        return Ok((StatusCode::OK, headers, body).into_response());
+    }
+
+    // local path: allow only known-safe prefixes (match legacy guardrails)
+    if !file_path.starts_with("./") && !file_path.starts_with("uploads/") && !file_path.contains(":\\") {
+        return Err(AppError::BadRequest("Unsupported storage backend".to_string()));
+    }
+
+    let disk = fs::File::open(&file_path).await.map_err(|e| {
+        tracing::error!(path = %file_path, error = %e, "open file for fs download");
+        AppError::NotFound("File not found".to_string())
+    })?;
+    let body = Body::from_stream(ReaderStream::new(disk));
+    Ok((StatusCode::OK, headers, body).into_response())
 }

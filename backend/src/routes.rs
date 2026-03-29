@@ -211,6 +211,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/fs/files/:id", delete(fs_cqrs::delete_file))
         .route("/api/fs/files/:id/move", patch(fs_cqrs::move_file))
         .route("/api/fs/files/:id/rename", patch(fs_cqrs::rename_file))
+        .route("/api/fs/files/:id/download", get(fs_cqrs::download_file_fs))
         .route("/api/fs/files/:id/download-url", get(fs_cqrs::get_download_url_fs))
         .route("/api/fs/files/:id/permissions", get(fs_cqrs::get_permissions).put(fs_cqrs::set_permissions))
         .route("/api/fs/files/:id/versions", get(fs_cqrs::list_versions))

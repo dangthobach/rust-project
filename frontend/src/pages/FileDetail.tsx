@@ -1,7 +1,8 @@
-import { Component, For, Show, createMemo } from 'solid-js';
+import { Component, For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { A, useParams } from '@solidjs/router';
-import { useDownloadFile, useFile, useFileActivity, useFileVersions, useRollbackVersion } from '~/lib/hooks/useFiles';
+import { useDownloadFile, useFile, useFileActivity, useFileDownloadUrl, useFileVersions, useRollbackVersion } from '~/lib/hooks/useFiles';
 import { Spinner } from '~/components/ui';
+import { useQueryClient } from '@tanstack/solid-query';
 
 const MaterialIcon: Component<{ name: string; class?: string }> = (props) => (
   <span class={['material-symbols-outlined', props.class ?? ''].join(' ')} aria-hidden="true">
@@ -31,6 +32,46 @@ const FileDetail: Component = () => {
   const versions = useFileVersions(fileId, () => !!fileId());
   const rollback = useRollbackVersion();
   const activity = useFileActivity(fileId, () => !!fileId());
+  const qc = useQueryClient();
+
+  const isImage = createMemo(() => (file.data?.mime_type ?? '').startsWith('image/'));
+  const dlUrl = useFileDownloadUrl(fileId, () => !!fileId() && isImage());
+  const [forceProxy, setForceProxy] = createSignal(false);
+  const proxySrc = createMemo(() => `/api/fs/files/${fileId()}/download`);
+  const imageSrc = createMemo(() => {
+    const url = (dlUrl.data as any)?.download_url as string | undefined;
+    if (!forceProxy() && url) return url;
+    return proxySrc();
+  });
+
+  let refreshTimer: number | undefined;
+  createEffect(() => {
+    // Only refresh when using presigned URL.
+    if (forceProxy()) return;
+    if (!dlUrl.data) return;
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    const expiresIn = Number((dlUrl.data as any).expires_in ?? 0);
+    const refreshInMs = Math.max(5_000, (expiresIn - 60) * 1000);
+    if (expiresIn > 0) {
+      refreshTimer = window.setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['files', 'download-url', fileId()] });
+      }, refreshInMs);
+    }
+  });
+
+  createEffect(() => {
+    if (!isImage()) return;
+    // If presign is unsupported or errors, fallback to proxy endpoint.
+    if (dlUrl.isError) {
+      setForceProxy(true);
+    } else if ((dlUrl.data as any)?.download_url) {
+      setForceProxy(false);
+    }
+  });
+
+  onCleanup(() => {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+  });
 
   const title = createMemo(() => file.data?.name || `FILE_${fileId()}`);
   const breadcrumbs = createMemo(() => {
@@ -138,7 +179,7 @@ const FileDetail: Component = () => {
 
                 {/* Lightweight preview: show image thumbs, otherwise a “document sheet” mock */}
                 <Show
-                  when={file.data!.mime_type?.startsWith('image/')}
+                  when={isImage()}
                   fallback={
                     <div class="mx-auto max-w-2xl space-y-6 font-body text-neutral-darkGray">
                       <div class="border-b-[3px] border-black pb-4">
@@ -163,16 +204,29 @@ const FileDetail: Component = () => {
                     </div>
                   }
                 >
-                  <div class="flex items-center justify-center">
-                    <div class="flex h-[360px] w-full max-w-3xl items-center justify-center border-[3px] border-black bg-neutral-lightGray text-black/70">
-                      <div class="text-center">
-                        <div class="text-sm font-heading font-black uppercase">Image preview</div>
-                        <div class="mt-2 text-xs">
-                          Inline preview is disabled for presigned-only downloads. Use Download.
-                        </div>
+                  <Show
+                    when={!dlUrl.isLoading && (forceProxy() || (dlUrl.data as any)?.download_url)}
+                    fallback={
+                      <div class="flex items-center justify-center py-20">
+                        <Spinner />
                       </div>
+                    }
+                  >
+                    <div class="flex items-center justify-center">
+                      <img
+                        src={imageSrc()}
+                        alt={title()}
+                        class="max-h-[520px] w-full max-w-3xl border-[3px] border-black object-contain bg-white"
+                        onError={() => {
+                          // If presigned fails (expired), refresh; if still failing, fallback to proxy.
+                          if (!forceProxy()) {
+                            qc.invalidateQueries({ queryKey: ['files', 'download-url', fileId()] });
+                            setForceProxy(true);
+                          }
+                        }}
+                      />
                     </div>
-                  </div>
+                  </Show>
                 </Show>
               </div>
 
