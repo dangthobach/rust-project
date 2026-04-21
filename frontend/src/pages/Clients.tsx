@@ -152,7 +152,7 @@ const Clients: Component = () => {
 
       <Show when={clients.data}>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <For each={clients.data?.data || []}>
+          <For each={clients.data?.items || []}>
             {(client: any) => (
               <div class="relative group">
                 <ClientCard
@@ -191,29 +191,29 @@ const Clients: Component = () => {
           </For>
         </div>
 
-        {/* Pagination (approximate for CQRS list; disabled while searching) */}
-        <Show when={clients.data?.pagination && search().trim().length === 0}>
+        {/* Pagination */}
+        <Show when={clients.data && search().trim().length === 0}>
           <div class="flex items-center justify-between mt-8">
             <p class="text-sm text-neutral-darkGray">
-              Showing {clients.data?.data?.length || 0} of {clients.data?.pagination?.total || 0} clients
+              Showing {clients.data?.items?.length || 0} of {clients.data?.total || 0} clients
             </p>
             
             <div class="flex gap-2">
               <Button
                 variant="secondary"
-                disabled={!clients.data?.pagination?.has_prev}
+                disabled={(clients.data?.page ?? 1) <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
               >
                 ← Previous
               </Button>
               
               <Badge variant="primary" class="px-4 py-2">
-                Page {page()} of {clients.data?.pagination?.total_pages || 1}
+                Page {page()} of {clients.data?.total_pages || 1}
               </Badge>
               
               <Button
                 variant="secondary"
-                disabled={!clients.data?.pagination?.has_next}
+                disabled={(clients.data?.page ?? 1) >= (clients.data?.total_pages ?? 1)}
                 onClick={() => setPage(p => p + 1)}
               >
                 Next →

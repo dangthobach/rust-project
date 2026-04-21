@@ -1,8 +1,9 @@
 use axum::{extract::{Query, State}, Extension, Json};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::PgPool;
 
 use crate::app_state::AppState;
+use crate::core::shared::pagination::{PaginatedResponse as CorePaginatedResponse, Pagination, PaginationParams};
 use crate::error::AppError;
 
 #[derive(Debug, Serialize)]
@@ -317,40 +318,6 @@ pub struct ActivityItem {
     pub created_at: String,
 }
 
-/// Pagination parameters
-#[derive(Debug, Deserialize)]
-pub struct PaginationParams {
-    #[serde(default = "default_page")]
-    pub page: i64,
-    #[serde(default = "default_limit")]
-    pub limit: i64,
-}
-
-fn default_page() -> i64 {
-    1
-}
-
-fn default_limit() -> i64 {
-    20
-}
-
-/// Paginated response wrapper
-#[derive(Debug, Serialize)]
-pub struct PaginatedResponse<T> {
-    pub data: Vec<T>,
-    pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginationInfo {
-    pub page: i64,
-    pub limit: i64,
-    pub total: i64,
-    pub total_pages: i64,
-    pub has_next: bool,
-    pub has_prev: bool,
-}
-
 /// Health check response
 #[derive(Debug, Serialize)]
 pub struct HealthCheckResponse {
@@ -366,12 +333,12 @@ pub async fn get_activity_feed(
     State(state): State<AppState>,
     Query(params): Query<PaginationParams>,
     Extension(_user_id): Extension<String>,
-) -> Result<Json<PaginatedResponse<ActivityItem>>, AppError> {
+) -> Result<Json<CorePaginatedResponse<ActivityItem>>, AppError> {
     let pool = state.pool();
 
-    let page = params.page.max(1);
-    let limit = params.limit.clamp(1, 100);
-    let offset = (page - 1) * limit;
+    params.validate()?;
+    let p = Pagination::new(params.page, params.limit);
+    let offset = p.offset();
 
     // Get total count
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM activities")
@@ -399,7 +366,7 @@ pub async fn get_activity_feed(
          ORDER BY a.created_at DESC
          LIMIT $1 OFFSET $2"
     )
-    .bind(limit)
+    .bind(p.limit())
     .bind(offset)
     .fetch_all(pool)
     .await
@@ -423,21 +390,7 @@ pub async fn get_activity_feed(
     })
     .collect();
 
-    let total_pages = (total as f64 / limit as f64).ceil() as i64;
-
-    let response = PaginatedResponse {
-        data: activities,
-        pagination: PaginationInfo {
-            page,
-            limit,
-            total,
-            total_pages,
-            has_next: page < total_pages,
-            has_prev: page > 1,
-        },
-    };
-
-    Ok(Json(response))
+    Ok(Json(CorePaginatedResponse::new(activities, total, p)))
 }
 
 /// Health check endpoint for monitoring

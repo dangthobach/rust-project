@@ -4,9 +4,12 @@ use axum::{
     response::IntoResponse,
     Extension,
 };
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use sqlx::{Postgres, QueryBuilder};
 
 use crate::app_state::AppState;
+use crate::authz::{permissions as perm, AuthContext};
 use crate::error::{AppError, AppResult};
 use crate::models::{Client, Task, User};
 
@@ -18,39 +21,41 @@ pub struct ExportParams {
     pub end_date: Option<String>,
 }
 
-/// Export clients to CSV/JSON
+fn parse_date(s: &str, field: &str) -> Result<DateTime<Utc>, AppError> {
+    s.parse::<DateTime<Utc>>()
+        .map_err(|_| AppError::ValidationError(format!("{field} must be RFC3339 (e.g. 2024-01-01T00:00:00Z)")))
+}
+
+/// Export clients to CSV/JSON — requires client.write permission
 pub async fn export_clients(
-    Extension(user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
+    ctx.require(perm::CLIENT_WRITE)?;
     let pool = state.pool();
 
-    // Build query with filters
-    let mut query = String::from("SELECT * FROM clients WHERE 1=1");
-    
-    if let Some(status) = &params.status {
-        query.push_str(&format!(" AND status = '{}'", status));
+    let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM clients WHERE 1=1");
+    if let Some(ref status) = params.status {
+        qb.push(" AND status = ");
+        qb.push_bind(status);
     }
-    
-    if let Some(start_date) = &params.start_date {
-        query.push_str(&format!(" AND created_at >= '{}'", start_date));
+    if let Some(ref start_date) = params.start_date {
+        qb.push(" AND created_at >= ");
+        qb.push_bind(parse_date(start_date, "start_date")?);
     }
-    
-    if let Some(end_date) = &params.end_date {
-        query.push_str(&format!(" AND created_at <= '{}'", end_date));
+    if let Some(ref end_date) = params.end_date {
+        qb.push(" AND created_at <= ");
+        qb.push_bind(parse_date(end_date, "end_date")?);
     }
-    
-    query.push_str(" ORDER BY created_at DESC");
+    qb.push(" ORDER BY created_at DESC");
 
-    let clients = sqlx::query_as::<_, Client>(&query)
-        .fetch_all(pool)
-        .await?;
+    let clients = qb.build_query_as::<Client>().fetch_all(pool).await?;
 
     let format = params.format.as_deref().unwrap_or("csv");
     let export_job = serde_json::json!({
         "job": "report.export.clients",
-        "requested_by": user_id,
+        "requested_by": ctx.user_id.to_string(),
         "format": format
     });
     let _ = state
@@ -105,38 +110,44 @@ pub async fn export_clients(
     }
 }
 
-/// Export tasks to CSV/JSON
+/// Export tasks to CSV/JSON.
+/// Users with user.manage see all tasks; others see only their own (assigned or created).
 pub async fn export_tasks(
-    Extension(user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
     let pool = state.pool();
+    let admin_view = ctx.superuser() || ctx.has(perm::USER_MANAGE);
 
-    let mut query = String::from("SELECT * FROM tasks WHERE 1=1");
-    
-    if let Some(status) = &params.status {
-        query.push_str(&format!(" AND status = '{}'", status));
+    let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM tasks WHERE 1=1");
+    if !admin_view {
+        qb.push(" AND (assigned_to = ");
+        qb.push_bind(ctx.user_id);
+        qb.push(" OR created_by = ");
+        qb.push_bind(ctx.user_id);
+        qb.push(")");
     }
-    
-    if let Some(start_date) = &params.start_date {
-        query.push_str(&format!(" AND created_at >= '{}'", start_date));
+    if let Some(ref status) = params.status {
+        qb.push(" AND status = ");
+        qb.push_bind(status);
     }
-    
-    if let Some(end_date) = &params.end_date {
-        query.push_str(&format!(" AND created_at <= '{}'", end_date));
+    if let Some(ref start_date) = params.start_date {
+        qb.push(" AND created_at >= ");
+        qb.push_bind(parse_date(start_date, "start_date")?);
     }
-    
-    query.push_str(" ORDER BY created_at DESC");
+    if let Some(ref end_date) = params.end_date {
+        qb.push(" AND created_at <= ");
+        qb.push_bind(parse_date(end_date, "end_date")?);
+    }
+    qb.push(" ORDER BY created_at DESC");
 
-    let tasks = sqlx::query_as::<_, Task>(&query)
-        .fetch_all(pool)
-        .await?;
+    let tasks = qb.build_query_as::<Task>().fetch_all(pool).await?;
 
     let format = params.format.as_deref().unwrap_or("csv");
     let export_job = serde_json::json!({
         "job": "report.export.tasks",
-        "requested_by": user_id,
+        "requested_by": ctx.user_id.to_string(),
         "format": format
     });
     let _ = state
@@ -196,10 +207,11 @@ pub async fn export_tasks(
 
 /// Export users to CSV/JSON (Admin only)
 pub async fn export_users(
-    Extension(user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
 ) -> AppResult<impl IntoResponse> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     let mut query = String::from("SELECT * FROM users WHERE 1=1");
@@ -217,7 +229,7 @@ pub async fn export_users(
     let format = params.format.as_deref().unwrap_or("csv");
     let export_job = serde_json::json!({
         "job": "report.export.users",
-        "requested_by": user_id,
+        "requested_by": ctx.user_id.to_string(),
         "format": format
     });
     let _ = state
@@ -273,9 +285,10 @@ pub async fn export_users(
 
 /// Export dashboard stats report
 pub async fn export_dashboard_report(
-    Extension(user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
 ) -> AppResult<impl IntoResponse> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     // Gather all stats
@@ -341,7 +354,7 @@ pub async fn export_dashboard_report(
 
     let export_job = serde_json::json!({
         "job": "report.export.dashboard",
-        "requested_by": user_id
+        "requested_by": ctx.user_id.to_string()
     });
     let _ = state
         .rabbitmq_publisher

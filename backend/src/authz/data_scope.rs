@@ -12,8 +12,10 @@ use crate::authz::permissions as perm;
 use crate::error::AppError;
 use crate::models::{Client, Task};
 
-/// Stable root branch id (must match migration seed).
-pub const ROOT_BRANCH_ID: &str = "00000000-0000-0000-0000-0000000000b1";
+/// Compile-time fallback for the root branch (matches migration seed).
+/// Callers inside this crate use it as a last-resort default; the authoritative
+/// value at runtime comes from `system_settings.default_branch_id`.
+pub(crate) const ROOT_BRANCH_ID: &str = "00000000-0000-0000-0000-0000000000b1";
 
 #[derive(Clone, Debug)]
 pub enum DataScope {

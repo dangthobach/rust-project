@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::app_state::AppState;
 use crate::authz::data_scope::DataScope;
+use crate::authz::permissions as perm;
 use crate::authz::AuthContext;
 use crate::domains::tasks::handlers::{
     CompleteTaskHandler, CreateTaskHandler, DeleteTaskHandler, GetTaskHandler, ListTasksHandler,
@@ -20,7 +21,7 @@ use crate::domains::tasks::{
 };
 use crate::error::{AppError, AppResult};
 use crate::models::Task;
-use crate::utils::pagination::PaginatedResponse;
+use crate::utils::pagination::{PaginatedResponse, Pagination};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskPayload {
@@ -119,7 +120,11 @@ pub async fn list_tasks(
     let limit = params.limit.unwrap_or(50).max(1);
     let offset = params.offset.unwrap_or(0).max(0);
     let page = (offset / limit) + 1;
-    Ok(Json(PaginatedResponse::new(result.tasks, page, limit, result.total)))
+    Ok(Json(PaginatedResponse::new(
+        result.tasks,
+        result.total,
+        Pagination::new(page, limit),
+    )))
 }
 
 pub async fn get_task(
@@ -186,6 +191,7 @@ pub async fn delete_task(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
+    ctx.require(perm::TASK_DELETE_ANY)?;
     let command = DeleteTaskCommand {
         id: id.clone(),
         actor_id: Some(actor_id.clone()),

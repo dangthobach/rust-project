@@ -185,7 +185,7 @@ const Reports: Component = () => {
     );
   };
 
-  const rows = () => exportList.data?.data ?? [];
+  const rows = () => exportList.data?.items ?? [];
 
   return (
     <div class="font-body">

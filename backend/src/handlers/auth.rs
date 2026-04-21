@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::app_state::AppState;
+use crate::authz::load_system_settings;
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateUserRequest, LoginRequest, RefreshToken, User};
 use crate::utils::jwt;
@@ -28,85 +29,123 @@ pub async fn register(
 ) -> AppResult<(StatusCode, Json<AuthResponse>)> {
     let pool = state.pool();
 
-    // Validate input
     payload
         .validate()
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     tracing::info!(email = %payload.email, "User registration attempt");
 
-    // Check if user already exists
-    let existing_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-        .bind(&payload.email)
-        .fetch_optional(pool)
-        .await?;
-
-    if existing_user.is_some() {
-        tracing::warn!(email = %payload.email, "Email already registered");
-        return Err(AppError::BadRequest(
-            "Email already registered".to_string(),
+    // ── Guard: registration gate ──────────────────────────────────────────────
+    let settings = load_system_settings(pool).await?;
+    if !settings.registration_enabled {
+        return Err(AppError::Forbidden(
+            "Self-service registration is currently disabled".to_string(),
         ));
     }
 
-    // Hash password
+    // ── Duplicate check ───────────────────────────────────────────────────────
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM users WHERE email = $1 LIMIT 1")
+            .bind(&payload.email)
+            .fetch_optional(pool)
+            .await?;
+    if existing.is_some() {
+        tracing::warn!(email = %payload.email, "Email already registered");
+        return Err(AppError::BadRequest("Email already registered".to_string()));
+    }
+
+    // ── Create user ───────────────────────────────────────────────────────────
     let password_hash = password::hash(&payload.password)
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-    // Self-service registration: always `user` role + `user_roles` row (ignore payload.role for privilege).
     let user_id = uuid::Uuid::new_v4();
+
+    // `role` column is a legacy label; RBAC comes from user_roles.
+    // Use the first slug from settings as the display label.
+    let role_label = settings
+        .default_role_slugs
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("user");
+
     sqlx::query(
-        r#"
-        INSERT INTO users (id, email, password_hash, full_name, role)
-        VALUES ($1, $2, $3, $4, 'user')
-        "#,
+        "INSERT INTO users (id, email, password_hash, full_name, role) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(user_id)
     .bind(&payload.email)
     .bind(&password_hash)
     .bind(&payload.full_name)
+    .bind(role_label)
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        r#"
-        INSERT INTO user_roles (user_id, role_id)
-        SELECT $1, r.id FROM roles r WHERE r.slug = 'user' LIMIT 1
-        ON CONFLICT DO NOTHING
-        "#,
-    )
-    .bind(user_id)
-    .execute(pool)
-    .await?;
+    // ── Assign all default roles (dynamic, from system_settings) ─────────────
+    for slug in &settings.default_role_slugs {
+        let assigned: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM roles WHERE slug = $1 AND is_active = TRUE LIMIT 1")
+                .bind(slug)
+                .fetch_optional(pool)
+                .await?;
 
-    let default_branch =
-        uuid::Uuid::parse_str("00000000-0000-0000-0000-0000000000b1").map_err(|_| {
-            AppError::InternalServerError("invalid default branch id".to_string())
+        if assigned.is_none() {
+            tracing::warn!(slug = %slug, "default_role_slugs contains unknown role slug; skipping");
+            continue;
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_roles (user_id, role_id)
+            SELECT $1, r.id FROM roles r WHERE r.slug = $2 AND r.is_active = TRUE LIMIT 1
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(user_id)
+        .bind(slug)
+        .execute(pool)
+        .await?;
+    }
+
+    // ── Assign default branch (dynamic, from system_settings) ─────────────────
+    let branch_uuid = uuid::Uuid::parse_str(&settings.default_branch_id)
+        .map_err(|_| {
+            AppError::InternalServerError(format!(
+                "system_settings.default_branch_id is not a valid UUID: {}",
+                settings.default_branch_id
+            ))
         })?;
-    sqlx::query(
-        r#"
-        INSERT INTO user_branches (user_id, branch_id)
-        VALUES ($1, $2)
-        ON CONFLICT DO NOTHING
-        "#,
-    )
-    .bind(user_id)
-    .bind(default_branch)
-    .execute(pool)
-    .await?;
 
-    // Fetch created user
+    let branch_exists: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM branches WHERE id = $1 AND is_active = TRUE LIMIT 1")
+            .bind(branch_uuid)
+            .fetch_optional(pool)
+            .await?;
+
+    if branch_exists.is_none() {
+        tracing::warn!(
+            branch_id = %settings.default_branch_id,
+            "system_settings.default_branch_id references a non-existent or inactive branch"
+        );
+    } else {
+        sqlx::query(
+            "INSERT INTO user_branches (user_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(branch_uuid)
+        .execute(pool)
+        .await?;
+    }
+
+    // ── Fetch created user & generate tokens ──────────────────────────────────
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
 
-    // Generate tokens
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
     tracing::info!(user_id = %user.id, role = %user.role, "User registered successfully");
 
-    // Async jobs + domain event fanout
     let welcome_job = serde_json::json!({
         "job": "email.welcome",
         "user_id": user.id,
@@ -134,7 +173,7 @@ pub async fn register(
             access_token,
             refresh_token: refresh_token.token,
             token_type: "Bearer".to_string(),
-            expires_in: 86400, // 24 hours
+            expires_in: 86400,
             user,
         }),
     ))
@@ -146,14 +185,12 @@ pub async fn login(
 ) -> AppResult<Json<AuthResponse>> {
     let pool = state.pool();
 
-    // Validate input
     payload
         .validate()
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     tracing::info!(email = %payload.email, "Login attempt");
 
-    // Find user by email
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&payload.email)
         .fetch_optional(pool)
@@ -163,7 +200,6 @@ pub async fn login(
             AppError::Unauthorized("Invalid credentials".to_string())
         })?;
 
-    // Verify password
     let is_valid = password::verify(&payload.password, &user.password_hash)
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
@@ -172,13 +208,11 @@ pub async fn login(
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
-    // Check if user is active
     if !user.is_active {
         tracing::warn!(user_id = %user.id, "Inactive account login attempt");
         return Err(AppError::Unauthorized("Account is inactive".to_string()));
     }
 
-    // Generate tokens
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
@@ -188,12 +222,11 @@ pub async fn login(
         access_token,
         refresh_token: refresh_token.token,
         token_type: "Bearer".to_string(),
-        expires_in: 86400, // 24 hours
+        expires_in: 86400,
         user,
     }))
 }
 
-/// Refresh access token using refresh token
 pub async fn refresh(
     State(state): State<AppState>,
     Json(payload): Json<RefreshTokenRequest>,
@@ -202,19 +235,14 @@ pub async fn refresh(
 
     tracing::debug!("Token refresh attempt");
 
-    // Find and validate refresh token
     let old_refresh_token = RefreshToken::find_valid(pool, &payload.refresh_token).await?;
-
-    // Revoke old refresh token
     old_refresh_token.revoke(pool).await?;
 
-    // Fetch user
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 AND is_active = TRUE")
         .bind(old_refresh_token.user_id)
         .fetch_one(pool)
         .await?;
 
-    // Generate new tokens
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let new_refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
@@ -229,7 +257,6 @@ pub async fn refresh(
     }))
 }
 
-/// Logout (revoke refresh token)
 pub async fn logout(
     Extension(user_id): Extension<String>,
     State(state): State<AppState>,
@@ -239,18 +266,14 @@ pub async fn logout(
 
     tracing::info!(user_id = %user_id, "Logout attempt");
 
-    // Revoke the specified refresh token
     if let Ok(refresh_token) = RefreshToken::find_valid(pool, &payload.refresh_token).await {
         refresh_token.revoke(pool).await?;
         tracing::info!(user_id = %user_id, "Logout successful");
     }
 
-    Ok(Json(serde_json::json!({
-        "message": "Logged out successfully"
-    })))
+    Ok(Json(serde_json::json!({"message": "Logged out successfully"})))
 }
 
-/// Logout from all devices (revoke all refresh tokens)
 pub async fn logout_all(
     Extension(user_id): Extension<String>,
     State(state): State<AppState>,
@@ -263,7 +286,5 @@ pub async fn logout_all(
 
     tracing::info!(user_id = %user_id, "All devices logged out");
 
-    Ok(Json(serde_json::json!({
-        "message": "Logged out from all devices"
-    })))
+    Ok(Json(serde_json::json!({"message": "Logged out from all devices"})))
 }

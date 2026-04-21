@@ -1,7 +1,7 @@
 //! Branch tree + user↔branch assignment + optional resource grants (fine-grained).
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     Extension,
@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::authz::permissions as perm;
 use crate::authz::{invalidate_branch_cache, AuthContext};
+use crate::core::shared::pagination::{PagedSearchParams, PaginatedResponse};
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -37,6 +38,15 @@ pub struct GrantResourcePayload {
     pub user_id: String,
     pub resource_kind: String,
     pub resource_id: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct BranchWithAssignmentDto {
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub slug: String,
+    pub assigned: bool,
 }
 
 fn require_branch_manage(ctx: &AuthContext) -> Result<(), AppError> {
@@ -170,15 +180,14 @@ pub async fn grant_resource_access(
     Json(payload): Json<GrantResourcePayload>,
 ) -> AppResult<StatusCode> {
     require_grant_manage(&ctx)?;
+
     let kind = payload.resource_kind.trim().to_ascii_lowercase();
-    if kind != "client" && kind != "task" {
-        return Err(AppError::ValidationError(
-            "resource_kind must be client or task".to_string(),
-        ));
+    if kind.is_empty() {
+        return Err(AppError::ValidationError("resource_kind must not be empty".to_string()));
     }
-    Uuid::parse_str(&payload.user_id)
+    let user_uuid = Uuid::parse_str(&payload.user_id)
         .map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
-    Uuid::parse_str(&payload.resource_id)
+    let resource_uuid = Uuid::parse_str(&payload.resource_id)
         .map_err(|_| AppError::ValidationError("resource_id must be UUID".to_string()))?;
 
     sqlx::query(
@@ -188,9 +197,9 @@ pub async fn grant_resource_access(
         ON CONFLICT DO NOTHING
         "#,
     )
-    .bind(Uuid::parse_str(&payload.user_id).map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?)
+    .bind(user_uuid)
     .bind(&kind)
-    .bind(Uuid::parse_str(&payload.resource_id).map_err(|_| AppError::ValidationError("resource_id must be UUID".to_string()))?)
+    .bind(resource_uuid)
     .execute(state.pool())
     .await?;
 
@@ -204,10 +213,8 @@ pub async fn revoke_resource_access(
 ) -> AppResult<StatusCode> {
     require_grant_manage(&ctx)?;
     let kind = kind.trim().to_ascii_lowercase();
-    if kind != "client" && kind != "task" {
-        return Err(AppError::ValidationError(
-            "resource_kind must be client or task".to_string(),
-        ));
+    if kind.is_empty() {
+        return Err(AppError::ValidationError("resource_kind must not be empty".to_string()));
     }
     sqlx::query(
         "DELETE FROM resource_grants WHERE user_id = $1 AND resource_kind = $2 AND resource_id = $3",
@@ -218,4 +225,58 @@ pub async fn revoke_resource_access(
     .execute(state.pool())
     .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// List branches + assignment status for a given user (admin UI).
+/// GET /api/admin/rbac/users/:user_id/branches?page=&limit=&search=
+pub async fn list_branches_for_user(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<PagedSearchParams>,
+) -> AppResult<Json<PaginatedResponse<BranchWithAssignmentDto>>> {
+    require_branch_manage(&ctx)?;
+    params.validate()?;
+
+    let pagination = params.pagination();
+    let search = params.search_trimmed();
+
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM branches b
+        WHERE b.is_active = TRUE
+          AND ($1 = '' OR b.name ILIKE '%' || $1 || '%' OR b.slug ILIKE '%' || $1 || '%')
+        "#,
+    )
+    .bind(&search)
+    .fetch_one(state.pool())
+    .await?;
+
+    let items = sqlx::query_as::<_, BranchWithAssignmentDto>(
+        r#"
+        SELECT
+            b.id,
+            b.parent_id,
+            b.name,
+            b.slug,
+            EXISTS(
+                SELECT 1 FROM user_branches ub
+                WHERE ub.user_id = $1::uuid AND ub.branch_id = b.id
+            ) AS assigned
+        FROM branches b
+        WHERE b.is_active = TRUE
+          AND ($2 = '' OR b.name ILIKE '%' || $2 || '%' OR b.slug ILIKE '%' || $2 || '%')
+        ORDER BY assigned DESC, b.name ASC
+        LIMIT $3 OFFSET $4
+        "#,
+    )
+    .bind(&user_id)
+    .bind(&search)
+    .bind(pagination.limit())
+    .bind(pagination.offset())
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(PaginatedResponse::new(items, total, pagination)))
 }

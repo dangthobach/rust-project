@@ -17,7 +17,7 @@ use crate::authz::{
 use crate::error::{AppError, AppResult};
 use crate::models::{File, FileQuery};
 use crate::utils::file_validator;
-use crate::utils::pagination::{PaginatedResponse, PaginationParams};
+use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 
 const FTS_TERM_MAX_BYTES: usize = 200;
 const FILE_ID_MAX_LEN: usize = 64;
@@ -134,6 +134,7 @@ pub async fn list_files(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
 
     let data_sql = format!(
         "SELECT * FROM files {} ORDER BY created_at DESC LIMIT ${} OFFSET ${}",
@@ -147,7 +148,7 @@ pub async fn list_files(
     }
     let files = data_query.bind(limit).bind(offset).fetch_all(pool).await?;
 
-    Ok(Json(PaginatedResponse::new(files, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(files, total, p)))
 }
 
 pub async fn search_files(
@@ -180,6 +181,7 @@ pub async fn search_files(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
 
     let total: i64 = sqlx::query_scalar(
         r#"
@@ -244,7 +246,7 @@ pub async fn search_files(
         )
     })?;
 
-    Ok(Json(PaginatedResponse::new(files, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(files, total, p)))
 }
 
 pub async fn upload_file(

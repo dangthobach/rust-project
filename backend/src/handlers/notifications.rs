@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::{MarkAsReadRequest, Notification};
-use crate::utils::pagination::{PaginatedResponse, PaginationParams};
+use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 
 #[derive(Debug, serde::Deserialize)]
 pub struct NotificationQuery {
@@ -26,6 +26,7 @@ pub async fn list_notifications(
     let pool = state.pool();
 
     pagination.validate()?;
+    let p = Pagination::new(pagination.page, pagination.limit);
 
     let mut count_qb =
         QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM notifications WHERE user_id = ");
@@ -55,12 +56,7 @@ pub async fn list_notifications(
 
     let notifications = qb.build_query_as::<Notification>().fetch_all(pool).await?;
 
-    Ok(Json(PaginatedResponse::new(
-        notifications,
-        pagination.page,
-        pagination.limit,
-        total,
-    )))
+    Ok(Json(PaginatedResponse::new(notifications, total, p)))
 }
 
 pub async fn mark_as_read(

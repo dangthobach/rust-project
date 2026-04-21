@@ -34,8 +34,8 @@ const Notifications: Component = () => {
   const bulkDelete = useBulkDeleteNotifications();
   const deleteAllRead = useDeleteAllRead();
 
-  const displayNotifications = createMemo(() => notifications.data?.data || []);
-  const pagination = createMemo(() => notifications.data?.pagination);
+  const displayNotifications = createMemo(() => notifications.data?.items || []);
+  const pagination = createMemo(() => notifications.data);
 
   // Handlers
   const handleMarkAsRead = (id: string) => {

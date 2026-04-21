@@ -322,7 +322,7 @@ const Dashboard: Component = () => {
           
           <Show when={clients.data}>
             <div class="grid gap-4">
-              <For each={clients.data?.data?.slice(0, 3)}>
+              <For each={clients.data?.items?.slice(0, 3)}>
                 {(client: any) => (
                   <ClientCard
                     id={client.id}
@@ -425,7 +425,7 @@ const Dashboard: Component = () => {
         
         <Show when={tasks.data}>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <For each={tasks.data?.data?.slice(0, 4)}>
+            <For each={tasks.data?.items?.slice(0, 4)}>
               {(task: any) => (
                 <TaskCard
                   title={task.title}

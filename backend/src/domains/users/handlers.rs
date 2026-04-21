@@ -3,6 +3,7 @@ use sqlx::{QueryBuilder, Postgres, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::authz::load_system_settings;
 use crate::core::cqrs::{CommandHandler, QueryHandler};
 use crate::core::shared::append_aggregate_history;
 use crate::domains::users::{
@@ -12,6 +13,24 @@ use crate::domains::users::{
 use crate::error::AppError;
 use crate::models::User;
 use crate::utils::password;
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// Verify that a role slug exists and is active.
+async fn ensure_role_exists(pool: &PgPool, slug: &str) -> Result<(), AppError> {
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM roles WHERE slug = $1 AND is_active = TRUE LIMIT 1")
+            .bind(slug)
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_none() {
+        return Err(AppError::ValidationError(format!(
+            "Role '{}' does not exist or is inactive",
+            slug
+        )));
+    }
+    Ok(())
+}
 
 // ============ Command Handlers ============
 
@@ -30,18 +49,40 @@ impl CommandHandler<RegisterUserCommand> for RegisterUserHandler {
     type Error = AppError;
 
     async fn handle(&self, command: RegisterUserCommand) -> Result<User, Self::Error> {
-        let existing = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-            .bind(&command.email)
-            .fetch_optional(&*self.pool)
-            .await?;
+        let pool = &*self.pool;
 
+        // ── Duplicate check ───────────────────────────────────────────────────
+        let existing: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM users WHERE email = $1 LIMIT 1")
+                .bind(&command.email)
+                .fetch_optional(pool)
+                .await?;
         if existing.is_some() {
             return Err(AppError::Conflict("User already exists".to_string()));
         }
 
+        // ── Load settings for defaults ────────────────────────────────────────
+        let settings = load_system_settings(pool).await?;
+
+        // Determine effective role slug(s):
+        //   - If command specifies a role, validate it and use it exclusively.
+        //   - Otherwise, use all slugs from system_settings.default_role_slugs.
+        let role_slugs: Vec<String> = if let Some(ref slug) = command.role {
+            ensure_role_exists(pool, slug).await?;
+            vec![slug.clone()]
+        } else {
+            settings.default_role_slugs.clone()
+        };
+
+        // `role` column is a legacy label (kept for backward compat).
+        let role_label = role_slugs
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("user");
+
+        // ── Insert user ───────────────────────────────────────────────────────
         let password_hash = password::hash_password(&command.password)?;
         let user_id = Uuid::new_v4();
-        let role = command.role.unwrap_or_else(|| "user".to_string());
 
         let user = sqlx::query_as::<_, User>(
             r#"
@@ -54,41 +95,49 @@ impl CommandHandler<RegisterUserCommand> for RegisterUserHandler {
         .bind(&command.email)
         .bind(&password_hash)
         .bind(&command.full_name)
-        .bind(&role)
-        .fetch_one(&*self.pool)
+        .bind(role_label)
+        .fetch_one(pool)
         .await?;
+
+        // ── Assign RBAC roles ─────────────────────────────────────────────────
+        for slug in &role_slugs {
+            sqlx::query(
+                r#"
+                INSERT INTO user_roles (user_id, role_id)
+                SELECT $1, r.id FROM roles r WHERE r.slug = $2 AND r.is_active = TRUE LIMIT 1
+                ON CONFLICT DO NOTHING
+                "#,
+            )
+            .bind(user_id)
+            .bind(slug)
+            .execute(pool)
+            .await?;
+        }
+
+        // ── Assign default branch ─────────────────────────────────────────────
+        let branch_uuid = Uuid::parse_str(&settings.default_branch_id).map_err(|_| {
+            AppError::InternalServerError(format!(
+                "system_settings.default_branch_id is not a valid UUID: {}",
+                settings.default_branch_id
+            ))
+        })?;
 
         sqlx::query(
-            r#"
-            INSERT INTO user_roles (user_id, role_id)
-            SELECT $1, r.id FROM roles r WHERE LOWER(r.slug) = LOWER($2) LIMIT 1
-            ON CONFLICT DO NOTHING
-            "#,
+            "INSERT INTO user_branches (user_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
         .bind(user_id)
-        .bind(&role)
-        .execute(&*self.pool)
+        .bind(branch_uuid)
+        .execute(pool)
         .await?;
 
-        sqlx::query(
-            r#"
-            INSERT INTO user_branches (user_id, branch_id)
-            VALUES ($1, '00000000-0000-0000-0000-0000000000b1'::uuid)
-            ON CONFLICT DO NOTHING
-            "#,
-        )
-        .bind(user_id)
-        .execute(&*self.pool)
-        .await?;
-
-        let aggregate_id = user.id.to_string();
+        // ── Audit ─────────────────────────────────────────────────────────────
         append_aggregate_history(
             &self.pool,
             "user",
-            &aggregate_id,
+            &user.id.to_string(),
             "CREATE",
             None,
-            Some(&role),
+            Some(role_label),
             command.actor_id.as_deref(),
             None,
             Some(serde_json::json!({
@@ -126,6 +175,11 @@ impl CommandHandler<UpdateUserCommand> for UpdateUserHandler {
             return Err(AppError::ValidationError("No fields to update".to_string()));
         }
 
+        // Validate new role slug against DB (not a hardcoded list).
+        if let Some(ref slug) = command.role {
+            ensure_role_exists(&self.pool, slug).await?;
+        }
+
         let before = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
             .bind(&command.id)
             .fetch_optional(&*self.pool)
@@ -158,11 +212,10 @@ impl CommandHandler<UpdateUserCommand> for UpdateUserHandler {
             .fetch_one(&*self.pool)
             .await?;
 
-        let aggregate_id = user.id.to_string();
         append_aggregate_history(
             &self.pool,
             "user",
-            &aggregate_id,
+            &user.id.to_string(),
             "UPDATE",
             Some(&before.role),
             Some(&user.role),
@@ -216,7 +269,7 @@ impl CommandHandler<ChangePasswordCommand> for ChangePasswordHandler {
 
         let new_password_hash = password::hash_password(&command.new_password)?;
 
-        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
             .bind(&new_password_hash)
             .bind(&command.user_id)
             .execute(&*self.pool)
@@ -231,9 +284,7 @@ impl CommandHandler<ChangePasswordCommand> for ChangePasswordHandler {
             None,
             command.actor_id.as_deref(),
             None,
-            Some(serde_json::json!({
-                "password_changed": true
-            })),
+            Some(serde_json::json!({"password_changed": true})),
         )
         .await?;
 
@@ -262,6 +313,7 @@ impl CommandHandler<DeleteUserCommand> for DeleteUserHandler {
             .await?
             .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
+        // Audit before delete so we capture the pre-delete state.
         append_aggregate_history(
             &self.pool,
             "user",
@@ -308,12 +360,12 @@ impl QueryHandler<GetUserQuery> for GetUserHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetUserQuery) -> Result<Option<User>, Self::Error> {
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-            .bind(&query.id)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(user)
+        Ok(
+            sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+                .bind(&query.id)
+                .fetch_optional(&*self.pool)
+                .await?,
+        )
     }
 }
 
@@ -332,12 +384,12 @@ impl QueryHandler<GetUserByEmailQuery> for GetUserByEmailHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetUserByEmailQuery) -> Result<Option<User>, Self::Error> {
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-            .bind(query.email)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(user)
+        Ok(
+            sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+                .bind(query.email)
+                .fetch_optional(&*self.pool)
+                .await?,
+        )
     }
 }
 
@@ -356,7 +408,7 @@ impl QueryHandler<ListUsersQuery> for ListUsersHandler {
     type Error = AppError;
 
     async fn handle(&self, query: ListUsersQuery) -> Result<Vec<User>, Self::Error> {
-        let limit = query.limit.unwrap_or(50).max(1);
+        let limit = query.limit.unwrap_or(50).clamp(1, 200);
         let offset = query.offset.unwrap_or(0).max(0);
 
         let users = if let Some(role) = query.role {
@@ -369,11 +421,13 @@ impl QueryHandler<ListUsersQuery> for ListUsersHandler {
             .fetch_all(&*self.pool)
             .await?
         } else {
-            sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2")
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&*self.pool)
-                .await?
+            sqlx::query_as::<_, User>(
+                "SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&*self.pool)
+            .await?
         };
 
         Ok(users)

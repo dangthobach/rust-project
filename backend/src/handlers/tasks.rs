@@ -11,7 +11,7 @@ use crate::authz::data_scope::DataScope;
 use crate::authz::AuthContext;
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateTaskRequest, Task, TaskQuery, UpdateTaskRequest};
-use crate::utils::pagination::{PaginatedResponse, PaginationParams};
+use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 
 pub async fn list_tasks(
     Extension(actor_id): Extension<String>,
@@ -27,6 +27,7 @@ pub async fn list_tasks(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
     let scope = DataScope::from_auth_context(&ctx);
 
     let mut count_qb = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM tasks WHERE 1=1");
@@ -70,7 +71,7 @@ pub async fn list_tasks(
 
     let tasks = qb.build_query_as::<Task>().fetch_all(pool).await?;
 
-    Ok(Json(PaginatedResponse::new(tasks, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(tasks, total, p)))
 }
 
 pub async fn search_tasks(
@@ -91,6 +92,7 @@ pub async fn search_tasks(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
     let scope = DataScope::from_auth_context(&ctx);
 
     let mut count_qb = QueryBuilder::<Postgres>::new(
@@ -126,7 +128,7 @@ pub async fn search_tasks(
 
     let tasks = qb.build_query_as::<Task>().fetch_all(pool).await?;
 
-    Ok(Json(PaginatedResponse::new(tasks, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(tasks, total, p)))
 }
 
 pub async fn create_task(

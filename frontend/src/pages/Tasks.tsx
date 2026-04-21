@@ -98,7 +98,7 @@ const Tasks: Component = () => {
   };
 
   const paginationPageButtons = createMemo(() => {
-    const tp = tasks.data?.pagination?.total_pages || 1;
+    const tp = tasks.data?.total_pages || 1;
     const cur = page();
     const nums: number[] = [];
     const start = Math.max(1, Math.min(cur, tp) - 1);
@@ -209,7 +209,7 @@ const Tasks: Component = () => {
   };
 
   const tasksByStatus = createMemo(() => {
-    const rows = tasks.data?.data || [];
+    const rows = tasks.data?.items || [];
     const map: Record<string, unknown[]> = { todo: [], in_progress: [], done: [], cancelled: [] };
     for (const t of rows) {
       (map[(t as { status: string }).status] ??= []).push(t);
@@ -501,7 +501,7 @@ const Tasks: Component = () => {
               <p class="font-body text-sm text-neutral-gray mt-2">Initialize new ledger entry for the workspace.</p>
             </button>
 
-            <For each={tasks.data?.data || []}>
+            <For each={tasks.data?.items || []}>
               {(task: any, i) => (
                 <div class="relative group">
                   <Show when={viewMode() !== 'grid'}>
@@ -704,13 +704,13 @@ const Tasks: Component = () => {
           </div>
         </Show>
 
-        <Show when={tasks.data?.pagination && viewMode() !== 'kanban'}>
+        <Show when={tasks.data && viewMode() !== 'kanban'}>
           <footer class="mt-8 flex items-center justify-between border-[3px] border-black p-4 bg-white">
             <p class="font-heading text-[10px] font-black uppercase text-neutral-gray">
               {(() => {
-                const meta = tasks.data?.pagination;
+                const meta = tasks.data;
                 if (!meta) return 'Showing 0-0 of 0 technical tasks';
-                const limit = meta.limit || 1;
+                const limit = meta.page_size || 1;
                 const from = (meta.page - 1) * limit + 1;
                 const to = Math.min(meta.page * limit, meta.total);
                 const total = Number(meta.total).toLocaleString('en-US');
@@ -722,7 +722,7 @@ const Tasks: Component = () => {
               <button
                 type="button"
                 class="w-10 h-10 border-[3px] border-black flex items-center justify-center hover:bg-neutral-lightGray transition-colors disabled:opacity-40"
-                disabled={!tasks.data?.pagination?.has_prev}
+                disabled={(tasks.data?.page ?? 1) <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-label="Previous page"
               >
@@ -745,7 +745,7 @@ const Tasks: Component = () => {
               <button
                 type="button"
                 class="w-10 h-10 border-[3px] border-black flex items-center justify-center hover:bg-neutral-lightGray transition-colors disabled:opacity-40"
-                disabled={!tasks.data?.pagination?.has_next}
+                disabled={(tasks.data?.page ?? 1) >= (tasks.data?.total_pages ?? 1)}
                 onClick={() => setPage((p) => p + 1)}
                 aria-label="Next page"
               >

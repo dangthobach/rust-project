@@ -116,8 +116,8 @@ const Files: Component = () => {
     handleFileUpload(e.dataTransfer?.files || null);
   };
 
-  // Download handler
-  const handleDownload = (file: FileMetadata) => {
+  // Download handler (supports both legacy and FS CQRS file views)
+  const handleDownload = (file: { id: string; name: string }) => {
     downloadFile.mutate({ id: file.id, filename: file.name });
   };
 

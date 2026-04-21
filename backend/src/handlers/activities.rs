@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    authz::{permissions as perm, AuthContext},
     error::AppError,
     models::activity::{Activity, CreateActivityRequest},
 };
@@ -63,25 +64,43 @@ pub struct ActivityResponse {
     pub created_at: String,
 }
 
-/// Get recent activities with pagination
+/// Get recent activities with pagination.
+/// Non-admin callers are automatically scoped to their own activities;
+/// the `user_id` query param is ignored for them.
+/// Admins (user.manage or superuser) may filter by any user_id.
 pub async fn get_activities(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<AppState>,
     Query(params): Query<ActivityQueryParams>,
 ) -> Result<Json<PaginatedActivities>, AppError> {
     let pool = state.pool();
     let offset = (params.page - 1) * params.limit;
+    let admin_view = ctx.superuser() || ctx.has(perm::USER_MANAGE);
+
+    // Resolve the effective user_id scope:
+    // - admins: honour the query param (None = all users)
+    // - regular users: always force to caller's own id
+    let effective_uid: Option<Uuid> = if admin_view {
+        params
+            .user_id
+            .as_deref()
+            .map(|uid| {
+                Uuid::parse_str(uid)
+                    .map_err(|_| AppError::BadRequest("Invalid user_id filter".to_string()))
+            })
+            .transpose()?
+    } else {
+        Some(ctx.user_id)
+    };
 
     let mut count_qb = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM activities WHERE 1=1");
     if let Some(ref et) = params.entity_type {
         count_qb.push(" AND entity_type = ");
         count_qb.push_bind(et);
     }
-    if let Some(ref uid) = params.user_id {
-        let user_uuid = Uuid::parse_str(uid).map_err(|_| {
-            AppError::BadRequest("Invalid user_id filter".to_string())
-        })?;
+    if let Some(uid) = effective_uid {
         count_qb.push(" AND user_id = ");
-        count_qb.push_bind(user_uuid);
+        count_qb.push_bind(uid);
     }
     let total: i64 = count_qb
         .build_query_scalar()
@@ -97,12 +116,9 @@ pub async fn get_activities(
         qb.push(" AND entity_type = ");
         qb.push_bind(et);
     }
-    if let Some(ref uid) = params.user_id {
-        let user_uuid = Uuid::parse_str(uid).map_err(|_| {
-            AppError::BadRequest("Invalid user_id filter".to_string())
-        })?;
+    if let Some(uid) = effective_uid {
         qb.push(" AND user_id = ");
-        qb.push_bind(user_uuid);
+        qb.push_bind(uid);
     }
     qb.push(" ORDER BY created_at DESC LIMIT ");
     qb.push_bind(params.limit);

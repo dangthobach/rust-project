@@ -10,6 +10,7 @@ use validator::Validate;
 
 use crate::app_state::AppState;
 use crate::authz::data_scope::DataScope;
+use crate::authz::permissions as perm;
 use crate::authz::AuthContext;
 use crate::domains::clients::{
     CreateClientCommand, CreateClientHandler, DeleteClientCommand, DeleteClientHandler,
@@ -70,6 +71,7 @@ pub async fn create_client(
     State(state): State<AppState>,
     Json(payload): Json<CreateClientPayload>,
 ) -> AppResult<Json<Client>> {
+    ctx.require(perm::CLIENT_WRITE)?;
     payload
         .validate()
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
@@ -121,6 +123,7 @@ pub async fn update_client(
     Path(id): Path<String>,
     Json(payload): Json<UpdateClientPayload>,
 ) -> AppResult<Json<Client>> {
+    ctx.require(perm::CLIENT_WRITE)?;
     payload
         .validate()
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
@@ -171,6 +174,7 @@ pub async fn delete_client(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
+    ctx.require(perm::CLIENT_WRITE)?;
     let command = DeleteClientCommand {
         id: id.clone(),
         actor_id: Some(actor_id.clone()),

@@ -8,8 +8,8 @@ export const NotificationPanel: Component = () => {
   const [showAll, setShowAll] = createSignal(false);
   const [notifications] = createResource<Notification[]>(async () => {
     const res = await api.getNotifications();
-    const rows = res.data ?? [];
-    return rows.map((n) => ({
+    const rows = res.items ?? [];
+    return rows.map((n: ApiNotification) => ({
       ...n,
       isRead: n.is_read ?? n.read ?? false,
       time: new Date(n.created_at).toLocaleString(),

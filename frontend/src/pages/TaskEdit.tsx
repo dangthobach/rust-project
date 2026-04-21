@@ -63,7 +63,8 @@ const TaskEdit: Component = () => {
     async (term) => {
       const t = term.trim();
       if (t.length < 2) return [];
-      return api.searchClients({ search_term: t, limit: 8 });
+      const res = await api.searchClients({ search_term: t, limit: 8, page: 1 });
+      return res.items ?? [];
     },
     { initialValue: [] },
   );

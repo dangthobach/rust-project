@@ -4,6 +4,7 @@ mod files_policy;
 pub mod data_scope;
 mod loader;
 pub mod permissions;
+mod settings_loader;
 
 pub use context::AuthContext;
 pub use files_policy::{
@@ -15,4 +16,10 @@ pub use branch_loader::{
     invalidate_all_branch_cache, invalidate_branch_cache, load_accessible_branch_ids,
 };
 #[allow(unused_imports)]
-pub use loader::{invalidate_all_permission_cache, invalidate_permission_cache, load_effective_permissions};
+pub use loader::{
+    invalidate_all_permission_cache, invalidate_permission_cache, load_effective_permissions,
+};
+#[allow(unused_imports)]
+pub use settings_loader::{
+    invalidate_settings_cache, load_system_settings, SystemSettings,
+};

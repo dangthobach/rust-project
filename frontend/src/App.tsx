@@ -21,6 +21,8 @@ import UserManagement from './pages/UserManagement';
 import AdminDashboard from './pages/AdminDashboard';
 import Analytics from './pages/Analytics';
 import Search from './pages/Search';
+import RbacRoles from './pages/RbacRoles';
+import RbacPermissions from './pages/RbacPermissions';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 
@@ -144,6 +146,26 @@ const App: Component = () => {
           <AdminRoute>
             <Layout>
               <Users />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/roles"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RbacRoles />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/permissions"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RbacPermissions />
             </Layout>
           </AdminRoute>
         )}

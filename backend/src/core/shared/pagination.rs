@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::error::AppError;
 
 /// Pagination parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +31,79 @@ impl Default for Pagination {
             page: 1,
             page_size: 20,
         }
+    }
+}
+
+/// Query parameters (page + limit) used by most list endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationParams {
+    #[serde(default = "default_page")]
+    pub page: i64,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+}
+
+fn default_page() -> i64 {
+    1
+}
+
+fn default_limit() -> i64 {
+    20
+}
+
+impl PaginationParams {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if self.page < 1 {
+            return Err(AppError::ValidationError("page must be >= 1".to_string()));
+        }
+        if self.limit < 1 {
+            return Err(AppError::ValidationError("limit must be >= 1".to_string()));
+        }
+        if self.limit > 100 {
+            return Err(AppError::ValidationError("limit must be <= 100".to_string()));
+        }
+        Ok(())
+    }
+
+    pub fn offset(&self) -> i64 {
+        (self.page - 1) * self.limit
+    }
+
+    pub fn pagination(&self) -> Pagination {
+        Pagination::new(self.page, self.limit)
+    }
+}
+
+/// Query parameters for paged + searchable lists (admin UIs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PagedSearchParams {
+    #[serde(default = "default_page")]
+    pub page: i64,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    pub search: Option<String>,
+}
+
+impl PagedSearchParams {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if self.page < 1 {
+            return Err(AppError::ValidationError("page must be >= 1".to_string()));
+        }
+        if self.limit < 1 {
+            return Err(AppError::ValidationError("limit must be >= 1".to_string()));
+        }
+        if self.limit > 100 {
+            return Err(AppError::ValidationError("limit must be <= 100".to_string()));
+        }
+        Ok(())
+    }
+
+    pub fn pagination(&self) -> Pagination {
+        Pagination::new(self.page, self.limit)
+    }
+
+    pub fn search_trimmed(&self) -> String {
+        self.search.as_deref().unwrap_or("").trim().to_string()
     }
 }
 

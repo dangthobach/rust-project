@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::ReportExportJob;
-use crate::utils::pagination::{PaginatedResponse, PaginationParams};
+use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 
 #[derive(Debug, Deserialize)]
 pub struct StartReportExportRequest {
@@ -137,6 +137,7 @@ pub async fn list_report_exports(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
 
     let total: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(*)::bigint FROM report_export_jobs WHERE user_id = $1"#,
@@ -184,7 +185,7 @@ pub async fn list_report_exports(
         });
     }
 
-    Ok(Json(PaginatedResponse::new(items, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(items, total, p)))
 }
 
 pub async fn get_report_export_status(

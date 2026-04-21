@@ -8,7 +8,7 @@ use validator::Validate;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::models::{Client, ClientQuery, CreateClientRequest, UpdateClientRequest};
-use crate::utils::pagination::{PaginatedResponse, PaginationParams};
+use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 
 pub async fn list_clients(
     Extension(_user_id): Extension<Uuid>,
@@ -23,6 +23,7 @@ pub async fn list_clients(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
 
     let mut where_sql = String::from("WHERE 1=1");
     let mut bind_values: Vec<String> = Vec::new();
@@ -68,7 +69,7 @@ pub async fn list_clients(
 
     let clients = data_query.fetch_all(pool).await?;
 
-    Ok(Json(PaginatedResponse::new(clients, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(clients, total, p)))
 }
 
 pub async fn search_clients(
@@ -88,6 +89,7 @@ pub async fn search_clients(
     let page = pagination.page;
     let limit = pagination.limit;
     let offset = pagination.offset();
+    let p = Pagination::new(page, limit);
 
     let total: i64 = sqlx::query_scalar(
         r#"
@@ -114,7 +116,7 @@ pub async fn search_clients(
     .fetch_all(pool)
     .await?;
 
-    Ok(Json(PaginatedResponse::new(clients, page, limit, total)))
+    Ok(Json(PaginatedResponse::new(clients, total, p)))
 }
 
 pub async fn create_client(

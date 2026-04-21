@@ -15,7 +15,8 @@ use crate::api::{
 use crate::app_state::AppState;
 use crate::config::Config;
 use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, search, tasks, users, websocket};
-use crate::middleware::{auth as auth_middleware, deprecation, rate_limit, rbac};
+use crate::handlers::settings;
+use crate::middleware::{auth as auth_middleware, deprecation, rate_limit};
 
 /// Create router with uniform AppState
 ///
@@ -84,14 +85,12 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/logout-all", post(auth::logout_all));
 
-    // Manager/Admin only routes (write operations for clients and tasks)
-    // Using CQRS handlers for clients
+    // Write routes for clients and tasks — permission enforced inside each handler.
     let manager_routes = Router::new()
         .route("/api/clients", post(cqrs::create_client))
         .route("/api/clients/:id", patch(cqrs::update_client))
         .route("/api/clients/:id", delete(cqrs::delete_client))
-        .route("/api/tasks/:id", delete(tasks_cqrs::delete_task))
-        .route_layer(middleware::from_fn(rbac::require_manager_or_admin));
+        .route("/api/tasks/:id", delete(tasks_cqrs::delete_task));
 
     // Admin only routes
     let admin_routes = Router::new()
@@ -102,12 +101,20 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/admin/users/bulk", post(admin::bulk_user_actions))
         .route("/api/admin/users/:id", patch(users_cqrs::update_user_admin))
         .route("/api/admin/users/:id", delete(users_cqrs::delete_user_admin))
+        // System settings (admin UI) — dynamic runtime defaults.
+        .route("/api/admin/settings", get(settings::list_settings))
+        .route("/api/admin/settings/:key", patch(settings::patch_setting))
         // RBAC CRUD (roles/permissions and assignments)
         .route("/api/admin/rbac/roles", get(rbac_cqrs::list_roles))
+        .route("/api/admin/rbac/roles/paged", get(rbac_cqrs::list_roles_paged))
         .route("/api/admin/rbac/roles", post(rbac_cqrs::create_role))
         .route("/api/admin/rbac/roles/:role_id", patch(rbac_cqrs::update_role))
         .route("/api/admin/rbac/roles/:role_id", delete(rbac_cqrs::delete_role))
         .route("/api/admin/rbac/permissions", get(rbac_cqrs::list_permissions))
+        .route(
+            "/api/admin/rbac/permissions/paged",
+            get(rbac_cqrs::list_permissions_paged),
+        )
         .route("/api/admin/rbac/permissions", post(rbac_cqrs::create_permission))
         .route(
             "/api/admin/rbac/permissions/:code",
@@ -133,6 +140,18 @@ pub fn create_router_with_state(state: AppState) -> Router {
             "/api/admin/rbac/users/:user_id/roles/:role_id",
             delete(rbac_cqrs::revoke_role_from_user),
         )
+        .route(
+            "/api/admin/rbac/users/:user_id/roles",
+            get(rbac_cqrs::list_roles_for_user),
+        )
+        .route(
+            "/api/admin/rbac/roles/:role_id/permissions",
+            get(rbac_cqrs::list_permissions_for_role),
+        )
+        .route(
+            "/api/admin/rbac/roles/:role_id/users",
+            get(rbac_cqrs::list_users_for_role),
+        )
         // Branches + resource grants (admin)
         .route("/api/admin/branches", get(branch_cqrs::list_branches))
         .route("/api/admin/branches", post(branch_cqrs::create_branch))
@@ -145,6 +164,10 @@ pub fn create_router_with_state(state: AppState) -> Router {
             delete(branch_cqrs::revoke_user_branch),
         )
         .route(
+            "/api/admin/rbac/users/:user_id/branches",
+            get(branch_cqrs::list_branches_for_user),
+        )
+        .route(
             "/api/admin/grants",
             post(branch_cqrs::grant_resource_access),
         )
@@ -152,10 +175,9 @@ pub fn create_router_with_state(state: AppState) -> Router {
             "/api/admin/grants/:user_id/:kind/:resource_id",
             delete(branch_cqrs::revoke_resource_access),
         )
-        // Export routes (Admin only)
+        // Export routes (Admin only) — permission enforced inside handlers.
         .route("/api/export/users", get(export::export_users))
-        .route("/api/export/dashboard-report", get(export::export_dashboard_report))
-        .route_layer(middleware::from_fn(rbac::require_admin));
+        .route("/api/export/dashboard-report", get(export::export_dashboard_report));
 
     let protected_routes = Router::new()
         // Auth routes (require authentication)

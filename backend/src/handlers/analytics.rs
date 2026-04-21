@@ -9,6 +9,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::app_state::AppState;
+use crate::authz::AuthContext;
+use crate::authz::permissions as perm;
 use crate::error::AppError;
 
 /// Date range query parameters
@@ -167,8 +169,9 @@ pub struct DailyUpload {
 pub async fn get_user_activity_analytics(
     State(state): State<AppState>,
     Query(params): Query<DateRangeParams>,
-    Extension(_user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
 ) -> Result<Json<UserActivityAnalytics>, AppError> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     // Total activities in date range
@@ -273,8 +276,9 @@ pub async fn get_user_activity_analytics(
 pub async fn get_task_completion_analytics(
     State(state): State<AppState>,
     Query(params): Query<DateRangeParams>,
-    Extension(_user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
 ) -> Result<Json<TaskCompletionAnalytics>, AppError> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     // Total tasks created in range
@@ -401,8 +405,9 @@ pub async fn get_task_completion_analytics(
 pub async fn get_client_engagement_analytics(
     State(state): State<AppState>,
     Query(params): Query<DateRangeParams>,
-    Extension(_user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
 ) -> Result<Json<ClientEngagementAnalytics>, AppError> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     // Total clients
@@ -511,8 +516,9 @@ pub async fn get_client_engagement_analytics(
 pub async fn get_storage_analytics(
     State(state): State<AppState>,
     Query(params): Query<DateRangeParams>,
-    Extension(_user_id): Extension<String>,
+    Extension(ctx): Extension<AuthContext>,
 ) -> Result<Json<StorageAnalytics>, AppError> {
+    ctx.require(perm::USER_MANAGE)?;
     let pool = state.pool();
 
     // Total files

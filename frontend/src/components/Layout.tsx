@@ -2,6 +2,7 @@ import { Component, createEffect, createSignal, Show, JSX } from 'solid-js';
 import { A, useLocation } from '@solidjs/router';
 import AppShellHeader from './AppShellHeader';
 import ToastContainer from './ToastContainer';
+import { NO_AUTH } from '~/lib/env';
 
 const IconDashboard = () => (
   <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24" aria-hidden="true">
@@ -140,6 +141,41 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
             <span>Reports</span>
           </Show>
         </A>
+        <Show when={NO_AUTH}>
+          <div class="mt-2 border-t-3 border-black pt-3">
+            <div class="mb-2 font-heading text-[10px] font-black uppercase tracking-widest text-neutral-darkGray">
+              Admin
+            </div>
+            <div class="flex flex-col gap-2">
+              <A
+                href="/admin/rbac/roles"
+                class={navClass('/admin/rbac/roles')}
+                onClick={() => setMobileOpen(false)}
+                title="RBAC Roles"
+              >
+                <span class="text-base" aria-hidden="true">
+                  🛡️
+                </span>
+                <Show when={!sidebarCollapsed()}>
+                  <span>RBAC Roles</span>
+                </Show>
+              </A>
+              <A
+                href="/admin/rbac/permissions"
+                class={navClass('/admin/rbac/permissions')}
+                onClick={() => setMobileOpen(false)}
+                title="RBAC Permissions"
+              >
+                <span class="text-base" aria-hidden="true">
+                  🔑
+                </span>
+                <Show when={!sidebarCollapsed()}>
+                  <span>RBAC Permissions</span>
+                </Show>
+              </A>
+            </div>
+          </div>
+        </Show>
       </nav>
 
       <div class="mt-4 flex flex-col gap-2 border-t-3 border-black pt-4">

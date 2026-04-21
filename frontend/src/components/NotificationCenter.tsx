@@ -148,7 +148,7 @@ export const NotificationCenter: Component = () => {
               }
             >
               <Show
-                when={notifications.data?.data && notifications.data.data.length > 0}
+                when={notifications.data?.items && notifications.data.items.length > 0}
                 fallback={
                   <div class="p-8 text-center text-neutral-darkGray">
                     <div class="text-4xl mb-2">🔔</div>
@@ -156,7 +156,7 @@ export const NotificationCenter: Component = () => {
                   </div>
                 }
               >
-                <For each={notifications.data?.data}>
+                <For each={notifications.data?.items}>
                   {(notification) => (
                     <button
                       onClick={() => handleNotificationClick(notification)}
