@@ -1,0 +1,15 @@
+{
+  "name": "wasm-file-viewer",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "wasm_file_viewer_bg.wasm",
+    "wasm_file_viewer.js",
+    "wasm_file_viewer.d.ts"
+  ],
+  "main": "wasm_file_viewer.js",
+  "types": "wasm_file_viewer.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

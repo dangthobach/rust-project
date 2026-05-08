@@ -1,8 +1,9 @@
-import { Component, For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Component, For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { A, useParams } from '@solidjs/router';
 import { useDownloadFile, useFile, useFileActivity, useFileDownloadUrl, useFileVersions, useRollbackVersion } from '~/lib/hooks/useFiles';
 import { Spinner } from '~/components/ui';
 import { useQueryClient } from '@tanstack/solid-query';
+import initWasm, { FileViewer } from '~/wasm/wasm_file_viewer';
 
 const MaterialIcon: Component<{ name: string; class?: string }> = (props) => (
   <span class={['material-symbols-outlined', props.class ?? ''].join(' ')} aria-hidden="true">
@@ -34,8 +35,9 @@ const FileDetail: Component = () => {
   const activity = useFileActivity(fileId, () => !!fileId());
   const qc = useQueryClient();
 
-  const isImage = createMemo(() => (file.data?.mime_type ?? '').startsWith('image/'));
-  const dlUrl = useFileDownloadUrl(fileId, () => !!fileId() && isImage());
+  const isImage = createMemo(() => ((file.data as any)?.mime_type ?? '').startsWith('image/'));
+  // Always get download url to feed to wasm if not image
+  const dlUrl = useFileDownloadUrl(fileId, () => !!fileId());
   const [forceProxy, setForceProxy] = createSignal(false);
   const proxySrc = createMemo(() => `/api/fs/files/${fileId()}/download`);
   const imageSrc = createMemo(() => {
@@ -43,6 +45,9 @@ const FileDetail: Component = () => {
     if (!forceProxy() && url) return url;
     return proxySrc();
   });
+
+  const [wasmHtml, setWasmHtml] = createSignal<string | null>(null);
+  const [wasmLoading, setWasmLoading] = createSignal(false);
 
   let refreshTimer: number | undefined;
   createEffect(() => {
@@ -60,8 +65,6 @@ const FileDetail: Component = () => {
   });
 
   createEffect(() => {
-    if (!isImage()) return;
-    // If presign is unsupported or errors, fallback to proxy endpoint.
     if (dlUrl.isError) {
       setForceProxy(true);
     } else if ((dlUrl.data as any)?.download_url) {
@@ -69,18 +72,62 @@ const FileDetail: Component = () => {
     }
   });
 
+  // Load WASM and file content when it's not an image
+  createEffect(() => {
+    const f = file.data as any;
+    if (!f || isImage()) return;
+    const url = imageSrc();
+    if (!url || dlUrl.isLoading) return;
+
+    let isActive = true;
+    setWasmLoading(true);
+
+    const load = async () => {
+      try {
+        await initWasm();
+        
+        // Fetch with auth token if using proxy
+        const token = localStorage.getItem('auth_token');
+        const headers = new Headers();
+        if (token && url.startsWith('/api')) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        
+        const res = await fetch(url, { headers });
+        if (!res.ok) throw new Error('Failed to fetch file');
+        
+        const buffer = await res.arrayBuffer();
+        if (!isActive) return;
+
+        const viewer = new FileViewer(f.mime_type || f.file_type);
+        viewer.load_content(new Uint8Array(buffer));
+        setWasmHtml(viewer.render());
+      } catch (err) {
+        console.error('WASM load error:', err);
+        if (isActive) setWasmHtml('<div class="text-red-500 font-bold">Failed to load preview via WASM</div>');
+      } finally {
+        if (isActive) setWasmLoading(false);
+      }
+    };
+
+    load();
+
+    onCleanup(() => {
+      isActive = false;
+    });
+  });
+
   onCleanup(() => {
     if (refreshTimer) window.clearTimeout(refreshTimer);
   });
 
-  const title = createMemo(() => file.data?.name || `FILE_${fileId()}`);
+  const title = createMemo(() => (file.data as any)?.name || `FILE_${fileId()}`);
   const breadcrumbs = createMemo(() => {
-    // Until folders exist in backend, keep a stable breadcrumb shape matching mock.
     return ['Documents', 'Engineering', title()];
   });
 
   const handleDownload = () => {
-    const f = file.data;
+    const f = file.data as any;
     if (!f) return;
     download.mutate({ id: f.id, filename: f.name });
   };
@@ -103,12 +150,12 @@ const FileDetail: Component = () => {
           </nav>
           <h1 class="mt-2 text-heading-2 font-heading font-black uppercase tracking-tight">{title()}</h1>
           <Show when={file.data}>
-            {(f) => (
+            {(f: any) => (
               <div class="mt-2 flex flex-wrap gap-3 text-[10px] font-heading font-bold uppercase text-neutral-darkGray">
-                <span class="border-2 border-black bg-white px-2 py-1">ID: {f().id}</span>
-                <span class="border-2 border-black bg-white px-2 py-1">{formatFileSize(f().size)}</span>
-                <span class="border-2 border-black bg-white px-2 py-1">{f().mime_type}</span>
-                <span class="border-2 border-black bg-white px-2 py-1">{formatDateTiny(f().created_at)}</span>
+                <span class="border-2 border-black bg-white px-2 py-1">ID: {f.id}</span>
+                <span class="border-2 border-black bg-white px-2 py-1">{formatFileSize(f.size || f.file_size)}</span>
+                <span class="border-2 border-black bg-white px-2 py-1">{f.mime_type || f.file_type}</span>
+                <span class="border-2 border-black bg-white px-2 py-1">{formatDateTiny(f.created_at)}</span>
               </div>
             )}
           </Show>
@@ -159,8 +206,8 @@ const FileDetail: Component = () => {
           <div class="grid grid-cols-12 gap-6">
             {/* Preview + Activity (left bento) */}
             <div class="col-span-12 lg:col-span-8 flex flex-col gap-6">
-              <div class="relative min-h-[620px] border-[3px] border-black bg-white p-8 shadow-brutal-sm">
-                <div class="absolute right-4 top-4 flex gap-2">
+              <div class="relative min-h-[620px] border-[3px] border-black bg-white p-8 shadow-brutal-sm flex flex-col">
+                <div class="absolute right-4 top-4 flex gap-2 z-10">
                   <button
                     type="button"
                     class="flex h-10 w-10 items-center justify-center border-[3px] border-black bg-white hover:bg-primary"
@@ -177,30 +224,36 @@ const FileDetail: Component = () => {
                   </button>
                 </div>
 
-                {/* Lightweight preview: show image thumbs, otherwise a “document sheet” mock */}
                 <Show
                   when={isImage()}
                   fallback={
-                    <div class="mx-auto max-w-2xl space-y-6 font-body text-neutral-darkGray">
-                      <div class="border-b-[3px] border-black pb-4">
-                        <div class="text-xs font-heading font-black uppercase text-neutral-gray">
-                          Technical Specifications: Ledger Alpha
+                    <div class="flex-grow flex flex-col max-h-[620px]">
+                      <Show when={wasmLoading()}>
+                        <div class="flex-grow flex items-center justify-center">
+                          <Spinner />
                         </div>
-                        <div class="mt-2 text-2xl font-heading font-black uppercase text-black">
-                          {title()}
+                      </Show>
+                      <Show when={!wasmLoading() && wasmHtml()}>
+                        <div class="overflow-auto border-2 border-black p-4 flex-grow bg-neutral-lightGray/20 text-sm" innerHTML={wasmHtml()!} />
+                      </Show>
+                      <Show when={!wasmLoading() && !wasmHtml()}>
+                        <div class="mx-auto max-w-2xl space-y-6 font-body text-neutral-darkGray mt-12">
+                          <div class="border-b-[3px] border-black pb-4">
+                            <div class="text-xs font-heading font-black uppercase text-neutral-gray">
+                              Technical Specifications: Ledger Alpha
+                            </div>
+                            <div class="mt-2 text-2xl font-heading font-black uppercase text-black">
+                              {title()}
+                            </div>
+                            <div class="mt-1 text-[10px] font-heading font-bold uppercase text-neutral-gray">
+                              DOCUMENT ID: #{file.data!.id.slice(0, 8).toUpperCase()} • CLASSIFICATION: CONFIDENTIAL
+                            </div>
+                          </div>
+                          <p class="leading-relaxed">
+                            Preview not available for this file type. Please download the file to view it.
+                          </p>
                         </div>
-                        <div class="mt-1 text-[10px] font-heading font-bold uppercase text-neutral-gray">
-                          DOCUMENT ID: #{file.data!.id.slice(0, 8).toUpperCase()} • CLASSIFICATION: CONFIDENTIAL
-                        </div>
-                      </div>
-                      <p class="leading-relaxed">
-                        This is a preview placeholder. For non-image files, the backend currently exposes download URLs, but not an inline-rendered preview stream.
-                      </p>
-                      <div class="border-l-[6px] border-primary bg-primary/10 p-4">
-                        <div class="text-sm font-heading font-black uppercase text-black">
-                          NOTE: DO NOT PROCEED WITH ROLLBACK WITHOUT L3 AUTHORIZATION.
-                        </div>
-                      </div>
+                      </Show>
                     </div>
                   }
                 >
@@ -212,13 +265,12 @@ const FileDetail: Component = () => {
                       </div>
                     }
                   >
-                    <div class="flex items-center justify-center">
+                    <div class="flex items-center justify-center flex-grow">
                       <img
                         src={imageSrc()}
                         alt={title()}
                         class="max-h-[520px] w-full max-w-3xl border-[3px] border-black object-contain bg-white"
                         onError={() => {
-                          // If presigned fails (expired), refresh; if still failing, fallback to proxy.
                           if (!forceProxy()) {
                             qc.invalidateQueries({ queryKey: ['files', 'download-url', fileId()] });
                             setForceProxy(true);
@@ -273,7 +325,7 @@ const FileDetail: Component = () => {
                 <div class="mb-6 flex items-center justify-between">
                   <div class="text-lg font-heading font-black uppercase">Version History</div>
                   <div class="bg-black px-2 py-1 text-[10px] font-heading font-black uppercase text-[#A2FE00]">
-                    V.04 ACTIVE
+                    V.{(versions.data?.find((v: any) => v.is_current)?.version_no || '01').toString().padStart(2, '0')} ACTIVE
                   </div>
                 </div>
 
@@ -316,7 +368,11 @@ const FileDetail: Component = () => {
                                   type="button"
                                   class="mt-3 w-full border-[3px] border-black bg-white py-1 text-[10px] font-heading font-black uppercase hover:bg-primary disabled:opacity-60"
                                   disabled={rollback.isPending}
-                                  onClick={() => rollback.mutate({ fileId: fileId(), versionId: v.id })}
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to rollback to version ${v.version_no}?`)) {
+                                      rollback.mutate({ fileId: fileId(), versionId: v.id });
+                                    }
+                                  }}
                                 >
                                   Rollback to this version
                                 </button>

@@ -590,6 +590,22 @@ pub async fn get_folder_tree(
     State(state): State<AppState>,
     Path(folder_id): Path<String>,
 ) -> AppResult<Json<FolderTreeView>> {
+    let cache_key = format!("folder_tree:{folder_id}");
+    
+    // Try to get from cache first
+    if let Some(mut redis_client) = state.redis_client.clone() {
+        if let Ok(mut conn) = redis_client.get_multiplexed_async_connection().await {
+            use redis::AsyncCommands;
+            let cached: redis::RedisResult<String> = conn.get(&cache_key).await;
+            if let Ok(json_str) = cached {
+                if let Ok(tree) = serde_json::from_str::<FolderTreeView>(&json_str) {
+                    tracing::debug!("Folder tree cache hit for {}", folder_id);
+                    return Ok(Json(tree));
+                }
+            }
+        }
+    }
+
     let query = GetFolderTreeQuery {
         folder_id: parse_uuid(&folder_id, "folder_id")?,
         depth: Some(10),
@@ -597,6 +613,18 @@ pub async fn get_folder_tree(
     };
     let h = Arc::new(fs_state(&state).get_folder_tree_handler());
     let tree = state.query_bus.dispatch_with_handler(query, h).await?;
+    
+    // Cache the result
+    if let Some(mut redis_client) = state.redis_client.clone() {
+        if let Ok(mut conn) = redis_client.get_multiplexed_async_connection().await {
+            use redis::AsyncCommands;
+            if let Ok(json_str) = serde_json::to_string(&tree) {
+                // Cache for 5 minutes
+                let _: redis::RedisResult<()> = conn.set_ex(&cache_key, json_str, 300).await;
+            }
+        }
+    }
+    
     Ok(Json(tree))
 }
 

@@ -7,7 +7,6 @@ dist/
 .turbo/
 .cache/
 server/
-lib/
 
 # Development
 .env

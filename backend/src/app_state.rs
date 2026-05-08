@@ -48,6 +48,9 @@ pub struct AppState {
 
     /// Object storage integration (local or s3-compatible)
     pub object_storage: Arc<dyn ObjectStorage + Send + Sync>,
+
+    /// Redis Client for generic caching
+    pub redis_client: Option<redis::Client>,
 }
 
 impl AppState {
@@ -74,6 +77,8 @@ impl AppState {
             });
 
         tracing::info!("Attempting to connect to Redis at: {}", redis_url);
+        
+        let redis_client = redis::Client::open(redis_url.clone()).ok();
 
         // 2. Initialize Event Bus (Redis with InMemory fallback if server unreachable)
         let event_bus: Arc<dyn EventBus + Send + Sync> =
@@ -163,6 +168,7 @@ impl AppState {
             kafka_publisher,
             rabbitmq_publisher,
             object_storage,
+            redis_client,
         };
 
         tracing::info!("✅ AppState initialized successfully");
