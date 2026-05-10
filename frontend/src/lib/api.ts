@@ -2,6 +2,8 @@
  * Base API Client
  */
 
+import { getAuthToken, clearAuth, setAuth } from './auth';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export interface ApiResponse<T> {
@@ -22,8 +24,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('auth_token');
-  
+  const token = getAuthToken();
+
   const headers = new Headers(options.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
@@ -38,7 +40,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (response.status === 401) {
-    localStorage.removeItem('auth_token');
+    clearAuth();
     window.location.href = '/login';
     throw new ApiError(401, 'Unauthorized');
   }
@@ -107,13 +109,66 @@ export type ReportExportStatus = {
 };
 export type ReportType = 'users' | 'clients' | 'tasks' | 'inventory';
 
+// ── RBAC ──────────────────────────────────────────────────────────────────────
+
+export interface CorePaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface RoleDto {
+  id: string;
+  slug: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PermissionDto {
+  id: string;
+  code: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UserWithRoleDto extends User {
+  roles: RoleDto[];
+}
+
+export interface PermissionMatrixDto {
+  roles: RoleDto[];
+  permissions: PermissionDto[];
+  assignments: Array<{ role_id: string; permission_id: string }>;
+}
+
+export interface MenuNode {
+  key: string;
+  label: string;
+  path: string | null;
+  icon: string | null;
+  sort_order: number;
+  children: MenuNode[];
+}
+
+export interface CreateRoleInput {
+  slug: string;
+  description?: string;
+  is_active?: boolean;
+}
+
+export type UpdateRoleInput = Partial<CreateRoleInput>;
+
 export const api = {
   get: <T>(path: string, options?: RequestInit) => request<T>(path, { ...options, method: 'GET' }),
-  post: <T>(path: string, body?: any, options?: RequestInit) => 
-    request<T>(path, { 
-      ...options, 
-      method: 'POST', 
-      body: body instanceof FormData ? body : JSON.stringify(body) 
+  post: <T>(path: string, body?: any, options?: RequestInit) =>
+    request<T>(path, {
+      ...options,
+      method: 'POST',
+      body: body instanceof FormData ? body : JSON.stringify(body),
     }),
   patch: <T>(path: string, body?: any, options?: RequestInit) => 
     request<T>(path, { 
@@ -128,7 +183,93 @@ export const api = {
       body: body instanceof FormData ? body : JSON.stringify(body) 
     }),
   delete: <T>(path: string, options?: RequestInit) => request<T>(path, { ...options, method: 'DELETE' }),
-  
+
+  // RBAC — Roles
+  listRolesPaged: (params: { page?: number; limit?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.search) q.set('search', params.search);
+    return request<CorePaginatedResponse<RoleDto>>(`/admin/rbac/roles/paged?${q}`);
+  },
+  getRole: (id: string) => request<RoleDto>(`/admin/rbac/roles/${id}`),
+  createRole: (body: CreateRoleInput) =>
+    request<RoleDto>('/admin/rbac/roles', { method: 'POST', body: JSON.stringify(body) }),
+  updateRole: (id: string, body: UpdateRoleInput) =>
+    request<RoleDto>(`/admin/rbac/roles/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteRole: (id: string) => request<void>(`/admin/rbac/roles/${id}`, { method: 'DELETE' }),
+  deleteRolesBulk: (ids: string[]) =>
+    request<void>('/admin/rbac/roles/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
+
+  // RBAC — Permissions
+  listPermissionsPaged: (params: { page?: number; limit?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.search) q.set('search', params.search);
+    return request<CorePaginatedResponse<PermissionDto>>(`/admin/rbac/permissions/paged?${q}`);
+  },
+
+  // RBAC — Permission Matrix
+  getPermissionMatrix: () => request<PermissionMatrixDto>('/admin/rbac/matrix'),
+  updateRolePermissions: (roleId: string, permissionIds: string[]) =>
+    request<void>(`/admin/rbac/roles/${roleId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permission_ids: permissionIds }),
+    }),
+
+  // RBAC — User-Role assignment
+  listUsersWithRoles: (params: { page?: number; limit?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.search) q.set('search', params.search);
+    return request<CorePaginatedResponse<UserWithRoleDto>>(`/admin/users/with-roles?${q}`);
+  },
+  assignUserRole: (userId: string, roleSlug: string) =>
+    request<void>(`/admin/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role: roleSlug }),
+    }),
+  bulkAssignUserRole: (userIds: string[], roleSlug: string) =>
+    request<void>('/admin/users/bulk-assign-role', {
+      method: 'POST',
+      body: JSON.stringify({ user_ids: userIds, role: roleSlug }),
+    }),
+
+  // Auth
+  login: async (email: string, password: string) => {
+    const data = await request<any>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    setAuth(data);
+    return data;
+  },
+  logout: async (refreshToken?: string) => {
+    try {
+      if (refreshToken) {
+        await request<void>('/auth/logout', {
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      }
+    } finally {
+      clearAuth();
+    }
+  },
+  refreshToken: async (refreshToken: string) => {
+    const data = await request<any>('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    setAuth(data);
+    return data;
+  },
+
+  // Dynamic menus
+  getMyMenus: () => request<MenuNode[]>('/menus/my-menus'),
+
   // Backward compatibility methods
   uploadFile: (formData: FormData) => request<FileMetadata>('/fs/files/upload', { method: 'POST', body: formData }),
   getNotifications: () => request<Notification[]>('/notifications', { method: 'GET' }),

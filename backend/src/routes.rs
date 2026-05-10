@@ -1,7 +1,7 @@
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use sqlx::PgPool;
@@ -14,7 +14,7 @@ use crate::api::{
 };
 use crate::app_state::AppState;
 use crate::config::Config;
-use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, notifications, reports, search, tasks, users, websocket};
+use crate::handlers::{activities, admin, analytics, auth, dashboard, export, files, health, menus, notifications, reports, search, tasks, users, websocket};
 use crate::handlers::settings;
 use crate::middleware::{auth as auth_middleware, deprecation, rate_limit};
 
@@ -97,19 +97,25 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/api/admin/users", get(users_cqrs::list_users_admin))
         .route("/api/admin/users/search", get(admin::search_users))
         .route("/api/admin/users/stats", get(admin::get_user_stats))
+        .route("/api/admin/users/with-roles", get(users_cqrs::list_users_with_roles))
+        .route("/api/admin/users/bulk-assign-role", post(users_cqrs::bulk_assign_user_role))
         .route("/api/admin/users", post(users_cqrs::create_user_admin))
         .route("/api/admin/users/bulk", post(admin::bulk_user_actions))
         .route("/api/admin/users/:id", patch(users_cqrs::update_user_admin))
         .route("/api/admin/users/:id", delete(users_cqrs::delete_user_admin))
+        .route("/api/admin/users/:id/role", put(users_cqrs::assign_user_role))
         // System settings (admin UI) — dynamic runtime defaults.
         .route("/api/admin/settings", get(settings::list_settings))
         .route("/api/admin/settings/:key", patch(settings::patch_setting))
         // RBAC CRUD (roles/permissions and assignments)
         .route("/api/admin/rbac/roles", get(rbac_cqrs::list_roles))
         .route("/api/admin/rbac/roles/paged", get(rbac_cqrs::list_roles_paged))
+        .route("/api/admin/rbac/roles/bulk-delete", post(rbac_cqrs::bulk_delete_roles))
         .route("/api/admin/rbac/roles", post(rbac_cqrs::create_role))
+        .route("/api/admin/rbac/roles/:role_id", get(rbac_cqrs::get_role))
         .route("/api/admin/rbac/roles/:role_id", patch(rbac_cqrs::update_role))
         .route("/api/admin/rbac/roles/:role_id", delete(rbac_cqrs::delete_role))
+        .route("/api/admin/rbac/matrix", get(rbac_cqrs::get_permission_matrix))
         .route("/api/admin/rbac/permissions", get(rbac_cqrs::list_permissions))
         .route(
             "/api/admin/rbac/permissions/paged",
@@ -146,7 +152,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         )
         .route(
             "/api/admin/rbac/roles/:role_id/permissions",
-            get(rbac_cqrs::list_permissions_for_role),
+            get(rbac_cqrs::list_permissions_for_role).put(rbac_cqrs::set_role_permissions),
         )
         .route(
             "/api/admin/rbac/roles/:role_id/users",
@@ -254,6 +260,8 @@ pub fn create_router_with_state(state: AppState) -> Router {
             "/api/reports/exports/:id",
             get(reports::get_report_export_status),
         )
+        // Menu routes (dynamic navigation based on user permissions)
+        .route("/api/menus/my-menus", get(menus::get_my_menus))
         // WebSocket route for real-time notifications
         .route("/api/ws", get(websocket::websocket_handler))
         // Merge manager-only routes

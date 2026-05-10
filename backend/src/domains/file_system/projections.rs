@@ -38,14 +38,14 @@ impl Projection for FileViewProjection {
                     ON CONFLICT (id) DO NOTHING
                 "#,
                 )
-                .bind(e.file_id.to_string())
+                .bind(e.file_id)
                 .bind(&e.name)
                 .bind(&e.path)
-                .bind(e.parent_id.map(|id| id.to_string()))
+                .bind(e.parent_id)
                 .bind(e.size)
                 .bind(&e.mime_type)
-                .bind(e.owner_id.to_string())
-                .bind(e.occurred_at.to_rfc3339())
+                .bind(e.owner_id)
+                .bind(e.occurred_at)
                 .execute(&self.pool)
                 .await?;
             }
@@ -53,10 +53,10 @@ impl Projection for FileViewProjection {
                 sqlx::query(
                     "UPDATE file_views SET parent_id = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
-                .bind(e.new_parent_id.map(|id| id.to_string()))
+                .bind(e.new_parent_id)
                 .bind(&e.new_path)
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.file_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.file_id)
                 .execute(&self.pool)
                 .await?;
             }
@@ -64,15 +64,15 @@ impl Projection for FileViewProjection {
                 sqlx::query(
                     "UPDATE file_views SET deleted_at = $1, deleted_by = $2 WHERE id = $3",
                 )
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.deleted_by.to_string())
-                .bind(e.file_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.deleted_by)
+                .bind(e.file_id)
                 .execute(&self.pool)
                 .await?;
             }
             FileSystemEvent::FileRestored(e) => {
                 sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = $1")
-                    .bind(e.file_id.to_string())
+                    .bind(e.file_id)
                     .execute(&self.pool)
                     .await?;
             }
@@ -82,8 +82,8 @@ impl Projection for FileViewProjection {
                 )
                 .bind(&e.new_name)
                 .bind(&e.new_path)
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.file_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.file_id)
                 .execute(&self.pool)
                 .await?;
             }
@@ -91,7 +91,7 @@ impl Projection for FileViewProjection {
                 // Update permissions in file_permissions table
                 // Delete old permissions
                 sqlx::query("DELETE FROM file_permissions WHERE file_id = $1")
-                    .bind(e.file_id.to_string())
+                    .bind(e.file_id)
                     .execute(&self.pool)
                     .await?;
 
@@ -114,9 +114,9 @@ impl Projection for FileViewProjection {
                             ON CONFLICT DO NOTHING
                         "#,
                         )
-                        .bind(e.file_id.to_string())
+                        .bind(e.file_id)
                         .bind(subject_type)
-                        .bind(subject_id.map(|id| id.to_string()))
+                        .bind(subject_id)
                         .bind(format!("{:?}", permission).to_lowercase())
                         .bind(entry.inherited)
                         .execute(&self.pool)
@@ -134,12 +134,12 @@ impl Projection for FileViewProjection {
                     ON CONFLICT (id) DO NOTHING
                 "#,
                 )
-                .bind(e.folder_id.to_string())
+                .bind(e.folder_id)
                 .bind(&e.name)
                 .bind(&e.path)
-                .bind(e.parent_id.map(|id| id.to_string()))
-                .bind(e.owner_id.to_string())
-                .bind(e.occurred_at.to_rfc3339())
+                .bind(e.parent_id)
+                .bind(e.owner_id)
+                .bind(e.occurred_at)
                 .execute(&self.pool)
                 .await?;
             }
@@ -147,10 +147,10 @@ impl Projection for FileViewProjection {
                 sqlx::query(
                     "UPDATE file_views SET parent_id = $1, path = $2, updated_at = $3 WHERE id = $4",
                 )
-                .bind(e.new_parent_id.map(|id| id.to_string()))
+                .bind(e.new_parent_id)
                 .bind(&e.new_path)
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.folder_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.folder_id)
                 .execute(&self.pool)
                 .await?;
             }
@@ -158,15 +158,15 @@ impl Projection for FileViewProjection {
                 sqlx::query(
                     "UPDATE file_views SET deleted_at = $1, deleted_by = $2 WHERE id = $3",
                 )
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.deleted_by.to_string())
-                .bind(e.folder_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.deleted_by)
+                .bind(e.folder_id)
                 .execute(&self.pool)
                 .await?;
             }
             FileSystemEvent::FolderRestored(e) => {
                 sqlx::query("UPDATE file_views SET deleted_at = NULL, deleted_by = NULL WHERE id = $1")
-                    .bind(e.folder_id.to_string())
+                    .bind(e.folder_id)
                     .execute(&self.pool)
                     .await?;
             }
@@ -176,8 +176,8 @@ impl Projection for FileViewProjection {
                 )
                 .bind(&e.new_name)
                 .bind(&e.new_path)
-                .bind(e.occurred_at.to_rfc3339())
-                .bind(e.folder_id.to_string())
+                .bind(e.occurred_at)
+                .bind(e.folder_id)
                 .execute(&self.pool)
                 .await?;
             }

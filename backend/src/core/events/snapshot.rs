@@ -53,9 +53,9 @@ where
         sqlx::query(
             r#"
             INSERT INTO snapshots (aggregate_id, aggregate_type, aggregate_data, version)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (aggregate_id) 
-            DO UPDATE SET 
+            VALUES ($1::uuid, $2, $3, $4)
+            ON CONFLICT (aggregate_id)
+            DO UPDATE SET
                 aggregate_data = $3,
                 version = $4,
                 created_at = CURRENT_TIMESTAMP
@@ -76,7 +76,7 @@ where
             r#"
             SELECT aggregate_data, version
             FROM snapshots
-            WHERE aggregate_id = $1 AND aggregate_type = $2
+            WHERE aggregate_id = $1::uuid AND aggregate_type = $2
         "#,
         )
         .bind(id.to_string())
@@ -96,7 +96,7 @@ where
 
     async fn delete_snapshot(&self, id: &T::Id) -> Result<(), Self::Error> {
         sqlx::query(
-            "DELETE FROM snapshots WHERE aggregate_id = $1 AND aggregate_type = $2",
+            "DELETE FROM snapshots WHERE aggregate_id = $1::uuid AND aggregate_type = $2",
         )
         .bind(id.to_string())
         .bind(&self.aggregate_type)

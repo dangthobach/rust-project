@@ -147,9 +147,12 @@ impl CommandHandler<UpdateClientCommand> for UpdateClientHandler {
     type Error = AppError;
 
     async fn handle(&self, command: UpdateClientCommand) -> Result<Client, Self::Error> {
+        let id_uuid = Uuid::parse_str(&command.id)
+            .map_err(|_| AppError::ValidationError("Invalid client ID".to_string()))?;
+
         // 1. Get original client for previous values
         let original = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Client not found".to_string()))?;
@@ -209,7 +212,9 @@ impl CommandHandler<UpdateClientCommand> for UpdateClientHandler {
                 .push_bind(normalize_status(Some(v.as_str()))?);
         }
         if let Some(v) = &command.assigned_to {
-            separated.push("assigned_to = ").push_bind(v);
+            let uid = Uuid::parse_str(v)
+                .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
+            separated.push("assigned_to = ").push_bind(uid);
         }
         if let Some(v) = &command.notes {
             separated.push("notes = ").push_bind(v);
@@ -217,11 +222,11 @@ impl CommandHandler<UpdateClientCommand> for UpdateClientHandler {
         separated.push("updated_at = NOW()");
         drop(separated);
 
-        qb.push(" WHERE id = ").push_bind(&command.id);
+        qb.push(" WHERE id = ").push_bind(id_uuid);
         qb.build().execute(&*self.pool).await?;
 
         let client = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_one(&*self.pool)
             .await?;
 
@@ -330,9 +335,12 @@ impl CommandHandler<DeleteClientCommand> for DeleteClientHandler {
     type Error = AppError;
 
     async fn handle(&self, command: DeleteClientCommand) -> Result<(), Self::Error> {
+        let id_uuid = Uuid::parse_str(&command.id)
+            .map_err(|_| AppError::ValidationError("Invalid client ID".to_string()))?;
+
         // 1. Get client info before deletion (for event)
         let client = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Client not found".to_string()))?;
@@ -350,7 +358,7 @@ impl CommandHandler<DeleteClientCommand> for DeleteClientHandler {
 
         // 2. Delete from database
         let result = sqlx::query("DELETE FROM clients WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .execute(&*self.pool)
             .await?;
         append_aggregate_history(
@@ -426,8 +434,11 @@ impl QueryHandler<GetClientQuery> for GetClientHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetClientQuery) -> Result<Option<Client>, Self::Error> {
+        let id_uuid = Uuid::parse_str(&query.id)
+            .map_err(|_| AppError::ValidationError("Invalid client ID".to_string()))?;
+
         let client = sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = $1")
-            .bind(&query.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?;
 
@@ -471,7 +482,9 @@ impl QueryHandler<ListClientsQuery> for ListClientsHandler {
         }
 
         if let Some(assigned_to) = &query.assigned_to {
-            qb.push(" AND assigned_to = ").push_bind(assigned_to);
+            let uid = Uuid::parse_str(assigned_to)
+                .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
+            qb.push(" AND assigned_to = ").push_bind(uid);
         }
 
         data_scope::push_client_scope_filter(
@@ -546,10 +559,12 @@ fn normalize_status(status: Option<&str>) -> Result<String, AppError> {
 }
 
 async fn validate_branch_exists(pool: &PgPool, branch_id: &str) -> Result<(), AppError> {
+    let bid = Uuid::parse_str(branch_id)
+        .map_err(|_| AppError::ValidationError("branch_id must be UUID".to_string()))?;
     let n: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM branches WHERE id = $1 AND is_active = 1",
+        "SELECT COUNT(*) FROM branches WHERE id = $1 AND is_active = TRUE",
     )
-    .bind(branch_id)
+    .bind(bid)
     .fetch_one(pool)
     .await?;
     if n == 0 {
@@ -561,10 +576,10 @@ async fn validate_branch_exists(pool: &PgPool, branch_id: &str) -> Result<(), Ap
 }
 
 async fn validate_user_exists(pool: &PgPool, user_id: &str) -> Result<(), AppError> {
-    Uuid::parse_str(user_id)
+    let uid = Uuid::parse_str(user_id)
         .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
     let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = $1")
-        .bind(user_id)
+        .bind(uid)
         .fetch_one(pool)
         .await?;
     if exists == 0 {

@@ -1,5 +1,7 @@
 use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use uuid::Uuid;
 use validator::Validate;
 
 use crate::app_state::AppState;
@@ -9,6 +11,21 @@ use crate::models::{CreateUserRequest, LoginRequest, RefreshToken, User};
 use crate::utils::jwt;
 use crate::utils::password;
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AuthRoleInfo {
+    pub id: Uuid,
+    pub slug: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AuthBranchInfo {
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub slug: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
     pub access_token: String,
@@ -16,6 +33,57 @@ pub struct AuthResponse {
     pub token_type: String,
     pub expires_in: i64,
     pub user: User,
+    pub permissions: Vec<String>,
+    pub roles: Vec<AuthRoleInfo>,
+    pub branches: Vec<AuthBranchInfo>,
+}
+
+async fn load_user_auth_info(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<(Vec<String>, Vec<AuthRoleInfo>, Vec<AuthBranchInfo>), AppError> {
+    let permissions = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT DISTINCT p.code
+        FROM user_roles ur
+        INNER JOIN roles r ON r.id = ur.role_id AND r.is_active = TRUE
+        INNER JOIN role_permissions rp ON rp.role_id = r.id
+        INNER JOIN permissions p ON p.code = rp.permission_code AND p.is_active = TRUE
+        WHERE ur.user_id = $1
+        ORDER BY p.code
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let roles = sqlx::query_as::<_, AuthRoleInfo>(
+        r#"
+        SELECT r.id, r.slug, r.description
+        FROM roles r
+        INNER JOIN user_roles ur ON ur.role_id = r.id
+        WHERE ur.user_id = $1 AND r.is_active = TRUE
+        ORDER BY r.slug ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let branches = sqlx::query_as::<_, AuthBranchInfo>(
+        r#"
+        SELECT b.id, b.parent_id, b.name, b.slug
+        FROM branches b
+        INNER JOIN user_branches ub ON ub.branch_id = b.id
+        WHERE ub.user_id = $1 AND b.is_active = TRUE
+        ORDER BY b.name ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok((permissions, roles, branches))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -44,7 +112,7 @@ pub async fn register(
     }
 
     // ── Duplicate check ───────────────────────────────────────────────────────
-    let existing: Option<(i64,)> =
+    let existing: Option<(i32,)> =
         sqlx::query_as("SELECT 1 FROM users WHERE email = $1 LIMIT 1")
             .bind(&payload.email)
             .fetch_optional(pool)
@@ -60,28 +128,19 @@ pub async fn register(
 
     let user_id = uuid::Uuid::new_v4();
 
-    // `role` column is a legacy label; RBAC comes from user_roles.
-    // Use the first slug from settings as the display label.
-    let role_label = settings
-        .default_role_slugs
-        .first()
-        .map(|s| s.as_str())
-        .unwrap_or("user");
-
     sqlx::query(
-        "INSERT INTO users (id, email, password_hash, full_name, role) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO users (id, email, password_hash, full_name) VALUES ($1, $2, $3, $4)",
     )
     .bind(user_id)
     .bind(&payload.email)
     .bind(&password_hash)
     .bind(&payload.full_name)
-    .bind(role_label)
     .execute(pool)
     .await?;
 
     // ── Assign all default roles (dynamic, from system_settings) ─────────────
     for slug in &settings.default_role_slugs {
-        let assigned: Option<(i64,)> =
+        let assigned: Option<(i32,)> =
             sqlx::query_as("SELECT 1 FROM roles WHERE slug = $1 AND is_active = TRUE LIMIT 1")
                 .bind(slug)
                 .fetch_optional(pool)
@@ -114,7 +173,7 @@ pub async fn register(
             ))
         })?;
 
-    let branch_exists: Option<(i64,)> =
+    let branch_exists: Option<(i32,)> =
         sqlx::query_as("SELECT 1 FROM branches WHERE id = $1 AND is_active = TRUE LIMIT 1")
             .bind(branch_uuid)
             .fetch_optional(pool)
@@ -143,8 +202,9 @@ pub async fn register(
 
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
+    let (permissions, roles, branches) = load_user_auth_info(pool, user.id).await?;
 
-    tracing::info!(user_id = %user.id, role = %user.role, "User registered successfully");
+    tracing::info!(user_id = %user.id, "User registered successfully");
 
     let welcome_job = serde_json::json!({
         "job": "email.welcome",
@@ -175,6 +235,9 @@ pub async fn register(
             token_type: "Bearer".to_string(),
             expires_in: 86400,
             user,
+            permissions,
+            roles,
+            branches,
         }),
     ))
 }
@@ -216,7 +279,9 @@ pub async fn login(
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
-    tracing::info!(user_id = %user.id, role = %user.role, "Login successful");
+    let (permissions, roles, branches) = load_user_auth_info(pool, user.id).await?;
+
+    tracing::info!(user_id = %user.id, "Login successful");
 
     Ok(Json(AuthResponse {
         access_token,
@@ -224,6 +289,9 @@ pub async fn login(
         token_type: "Bearer".to_string(),
         expires_in: 86400,
         user,
+        permissions,
+        roles,
+        branches,
     }))
 }
 
@@ -246,6 +314,8 @@ pub async fn refresh(
     let access_token = jwt::generate_token(&user.id.to_string())?;
     let new_refresh_token = RefreshToken::create(pool, &user.id.to_string()).await?;
 
+    let (permissions, roles, branches) = load_user_auth_info(pool, user.id).await?;
+
     tracing::info!(user_id = %user.id, "Token refreshed successfully");
 
     Ok(Json(AuthResponse {
@@ -254,6 +324,9 @@ pub async fn refresh(
         token_type: "Bearer".to_string(),
         expires_in: 86400,
         user,
+        permissions,
+        roles,
+        branches,
     }))
 }
 

@@ -52,7 +52,7 @@ pub struct BulkActionResponse {
 /// Validate that `slug` is an existing active role in the DB.
 /// Eliminates all hardcoded role lists — new roles work automatically.
 async fn ensure_role_slug_valid(state: &AppState, slug: &str) -> AppResult<()> {
-    let exists: Option<(i64,)> =
+    let exists: Option<(i32,)> =
         sqlx::query_as("SELECT 1 FROM roles WHERE slug = $1 AND is_active = TRUE LIMIT 1")
             .bind(slug)
             .fetch_optional(state.pool())
@@ -140,13 +140,23 @@ pub async fn create_user(
     let user_id = uuid::Uuid::new_v4();
 
     sqlx::query(
-        "INSERT INTO users (id, email, password_hash, full_name, role, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())",
+        "INSERT INTO users (id, email, password_hash, full_name, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, NOW(), NOW())",
     )
     .bind(user_id)
     .bind(&payload.email)
     .bind(&password_hash)
     .bind(&payload.full_name)
+    .execute(state.pool())
+    .await?;
+
+    // Assign role in user_roles (M:N source of truth)
+    sqlx::query(
+        "INSERT INTO user_roles (user_id, role_id)
+         SELECT $1, id FROM roles WHERE slug = $2 AND is_active = TRUE
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
     .bind(&payload.role)
     .execute(state.pool())
     .await?;
@@ -168,6 +178,9 @@ pub async fn update_user_admin(
 ) -> AppResult<Json<User>> {
     ctx.require(perm::USER_MANAGE)?;
 
+    let id_uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| AppError::BadRequest("Invalid user ID".into()))?;
+
     if let Some(ref role) = payload.role {
         ensure_role_slug_valid(&state, role).await?;
     }
@@ -181,7 +194,7 @@ pub async fn update_user_admin(
     }
 
     let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = $1")
-        .bind(&id)
+        .bind(id_uuid)
         .fetch_one(state.pool())
         .await?;
     if exists == 0 {
@@ -195,17 +208,34 @@ pub async fn update_user_admin(
     if let Some(ref email) = payload.email {
         qb.push(", email = ").push_bind(email);
     }
-    if let Some(ref role) = payload.role {
-        qb.push(", role = ").push_bind(role);
-    }
     if let Some(ref status) = payload.status {
         qb.push(", status = ").push_bind(status);
     }
-    qb.push(" WHERE id = ").push_bind(&id);
+    qb.push(" WHERE id = ").push_bind(id_uuid);
     qb.build().execute(state.pool()).await?;
 
+    // Replace role assignment in user_roles if provided
+    if let Some(ref slug) = payload.role {
+        let mut tx = state.pool().begin().await?;
+        sqlx::query("DELETE FROM user_roles WHERE user_id = $1")
+            .bind(id_uuid)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO user_roles (user_id, role_id)
+             SELECT $1, id FROM roles WHERE slug = $2 AND is_active = TRUE
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(id_uuid)
+        .bind(slug)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        crate::authz::invalidate_permission_cache(id_uuid);
+    }
+
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(&id)
+        .bind(id_uuid)
         .fetch_one(state.pool())
         .await?;
 
@@ -220,8 +250,11 @@ pub async fn delete_user(
 ) -> AppResult<Json<serde_json::Value>> {
     ctx.require(perm::USER_MANAGE)?;
 
+    let id_uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| AppError::BadRequest("Invalid user ID".into()))?;
+
     let result = sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(&id)
+        .bind(id_uuid)
         .execute(state.pool())
         .await?;
 
@@ -261,10 +294,59 @@ pub async fn bulk_user_actions(
     let mut errors: Vec<String> = Vec::new();
 
     for user_id in &payload.user_ids {
+        // Parse UUID once per iteration — all actions need it.
+        let uid = match uuid::Uuid::parse_str(user_id) {
+            Ok(u) => u,
+            Err(_) => {
+                failed += 1;
+                errors.push(format!("User {user_id}: invalid UUID"));
+                continue;
+            }
+        };
+
+        if payload.action == "change_role" {
+            // Role lives in user_roles (M:N), not in the users table.
+            let role = payload.role.as_deref().unwrap(); // pre-validated above
+            let res: Result<(), sqlx::Error> = async {
+                let mut tx = state.pool().begin().await?;
+                sqlx::query("DELETE FROM user_roles WHERE user_id = $1")
+                    .bind(uid)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query(
+                    "INSERT INTO user_roles (user_id, role_id)
+                     SELECT $1, id FROM roles WHERE slug = $2 AND is_active = TRUE
+                     ON CONFLICT DO NOTHING",
+                )
+                .bind(uid)
+                .bind(role)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("UPDATE users SET updated_at = NOW() WHERE id = $1")
+                    .bind(uid)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                Ok(())
+            }
+            .await;
+            match res {
+                Ok(_) => {
+                    crate::authz::invalidate_permission_cache(uid);
+                    success += 1;
+                }
+                Err(e) => {
+                    failed += 1;
+                    errors.push(format!("User {user_id}: {e}"));
+                }
+            }
+            continue;
+        }
+
         let result = match payload.action.as_str() {
             "delete" => {
                 sqlx::query("DELETE FROM users WHERE id = $1")
-                    .bind(user_id)
+                    .bind(uid)
                     .execute(state.pool())
                     .await
             }
@@ -273,7 +355,7 @@ pub async fn bulk_user_actions(
                     "UPDATE users SET status = 'active', is_active = TRUE, updated_at = NOW()
                      WHERE id = $1",
                 )
-                .bind(user_id)
+                .bind(uid)
                 .execute(state.pool())
                 .await
             }
@@ -282,18 +364,7 @@ pub async fn bulk_user_actions(
                     "UPDATE users SET status = 'inactive', is_active = FALSE, updated_at = NOW()
                      WHERE id = $1",
                 )
-                .bind(user_id)
-                .execute(state.pool())
-                .await
-            }
-            "change_role" => {
-                // Safety: validated above; unwrap is safe here.
-                let role = payload.role.as_deref().unwrap();
-                sqlx::query(
-                    "UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2",
-                )
-                .bind(role)
-                .bind(user_id)
+                .bind(uid)
                 .execute(state.pool())
                 .await
             }
@@ -337,11 +408,16 @@ pub async fn get_user_stats(
     .fetch_one(pool)
     .await?;
 
-    // Role breakdown is dynamic — group by the legacy `role` column.
-    let role_rows: Vec<(String, i64)> =
-        sqlx::query_as("SELECT role, COUNT(*) FROM users GROUP BY role ORDER BY role")
-            .fetch_all(pool)
-            .await?;
+    // Role breakdown via user_roles M:N table (source of truth).
+    let role_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT r.slug, COUNT(ur.user_id)
+         FROM roles r
+         LEFT JOIN user_roles ur ON ur.role_id = r.id
+         GROUP BY r.slug
+         ORDER BY r.slug",
+    )
+    .fetch_all(pool)
+    .await?;
 
     let by_role: serde_json::Value = role_rows
         .into_iter()

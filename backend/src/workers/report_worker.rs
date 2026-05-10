@@ -159,14 +159,13 @@ async fn process_job(state: AppState, routing_key: &str, payload: &[u8]) -> anyh
                         "users",
                     )
                 } else {
-                    let mut csv = String::from("id,email,full_name,role,created_at\n");
+                    let mut csv = String::from("id,email,full_name,created_at\n");
                     for r in rows {
                         csv.push_str(&format!(
-                            "{},{},{},{},{}\n",
+                            "{},{},{},{}\n",
                             r.id,
                             r.email.replace(',', " "),
                             r.full_name.replace(',', " "),
-                            r.role,
                             r.created_at
                         ));
                     }

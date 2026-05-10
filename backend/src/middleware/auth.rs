@@ -43,7 +43,6 @@ pub async fn auth(
                 email: "anonymous@local".to_string(),
                 password_hash: "".to_string(),
                 full_name: "Anonymous".to_string(),
-                role: "admin".to_string(),
                 avatar_url: None,
                 is_active: true,
                 status: "active".to_string(),

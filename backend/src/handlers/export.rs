@@ -239,15 +239,14 @@ pub async fn export_users(
 
     match format {
         "csv" => {
-            let mut csv = String::from("ID,Email,Full Name,Role,Avatar URL,Created At,Updated At\n");
-            
+            let mut csv = String::from("ID,Email,Full Name,Avatar URL,Created At,Updated At\n");
+
             for user in users {
                 csv.push_str(&format!(
-                    "{},{},{},{},{},{},{}\n",
+                    "{},{},{},{},{},{}\n",
                     user.id,
                     escape_csv_field(&user.email),
                     escape_csv_field(&user.full_name),
-                    user.role,
                     escape_csv_field(&user.avatar_url.unwrap_or_default()),
                     user.created_at,
                     user.updated_at

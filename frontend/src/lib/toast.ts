@@ -27,3 +27,10 @@ export const showToast = (type: Toast['type'], titleOrMessage: string, message?:
 export const removeToast = (id: string) => {
   setToasts((prev) => prev.filter((t) => t.id !== id));
 };
+
+export const toast = {
+  success: (message: string, title?: string) => showToast('success', title ?? message, title ? message : undefined),
+  error: (message: string, title?: string) => showToast('error', title ?? message, title ? message : undefined),
+  info: (message: string, title?: string) => showToast('info', title ?? message, title ? message : undefined),
+  warning: (message: string, title?: string) => showToast('warning', title ?? message, title ? message : undefined),
+};

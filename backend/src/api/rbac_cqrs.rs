@@ -17,7 +17,7 @@ use crate::domains::rbac::{
     ListRolesQuery, RevokePermissionFromRoleCommand, RevokeRoleFromUserCommand,
     UpdatePermissionCommand, UpdateRoleCommand,
 };
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -337,6 +337,191 @@ pub async fn revoke_role_from_user(
 }
 
 // ── Paged M2M listing (immediate-toggle UI support) ────────────────────────────
+
+// ── Extra role endpoints ──────────────────────────────────────────────────────
+
+/// Get a single role by id.
+/// GET /api/admin/rbac/roles/:role_id
+pub async fn get_role(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+) -> AppResult<Json<RoleDto>> {
+    ctx.require(perm::ROLE_MANAGE)?;
+
+    let row = sqlx::query_as::<_, RoleDto>(
+        r#"
+        SELECT
+            r.id::text AS id,
+            r.slug,
+            r.description,
+            CASE WHEN r.is_active THEN 1 ELSE 0 END AS is_active,
+            r.created_at::text AS created_at
+        FROM roles r
+        WHERE r.id = $1::uuid
+        "#,
+    )
+    .bind(&role_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Role {role_id} not found")))?;
+
+    Ok(Json(row))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct BulkDeleteRolesRequest {
+    pub ids: Vec<String>,
+}
+
+/// Bulk-delete roles by id list.
+/// POST /api/admin/rbac/roles/bulk-delete
+pub async fn bulk_delete_roles(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Json(payload): Json<BulkDeleteRolesRequest>,
+) -> AppResult<StatusCode> {
+    ctx.require(perm::ROLE_MANAGE)?;
+    if payload.ids.is_empty() {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    // Convert string UUIDs, ignore invalid ones
+    let uuids: Vec<uuid::Uuid> = payload
+        .ids
+        .iter()
+        .filter_map(|s| uuid::Uuid::parse_str(s).ok())
+        .collect();
+
+    sqlx::query("DELETE FROM roles WHERE id = ANY($1)")
+        .bind(&uuids)
+        .execute(state.pool())
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Permission matrix ─────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct MatrixRoleDto {
+    pub id: String,
+    pub slug: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct MatrixPermDto {
+    pub id: String,
+    pub code: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct MatrixAssignment {
+    pub role_id: String,
+    pub permission_id: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct PermissionMatrixResponse {
+    pub roles: Vec<MatrixRoleDto>,
+    pub permissions: Vec<MatrixPermDto>,
+    pub assignments: Vec<MatrixAssignment>,
+}
+
+/// Full role × permission matrix.
+/// GET /api/admin/rbac/matrix
+pub async fn get_permission_matrix(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+) -> AppResult<Json<PermissionMatrixResponse>> {
+    ctx.require(perm::ROLE_MANAGE)?;
+
+    let roles = sqlx::query_as::<_, MatrixRoleDto>(
+        "SELECT id::text AS id, slug, description FROM roles WHERE is_active = true ORDER BY slug",
+    )
+    .fetch_all(state.pool())
+    .await?;
+
+    let permissions = sqlx::query_as::<_, MatrixPermDto>(
+        "SELECT code AS id, code, description FROM permissions WHERE is_active = true ORDER BY code",
+    )
+    .fetch_all(state.pool())
+    .await?;
+
+    let assignments = sqlx::query_as::<_, MatrixAssignment>(
+        r#"
+        SELECT rp.role_id::text AS role_id, rp.permission_code AS permission_id
+        FROM role_permissions rp
+        JOIN roles r ON r.id = rp.role_id AND r.is_active = true
+        JOIN permissions p ON p.code = rp.permission_code AND p.is_active = true
+        "#,
+    )
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(PermissionMatrixResponse { roles, permissions, assignments }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SetRolePermissionsRequest {
+    pub permission_ids: Vec<String>,
+}
+
+/// Replace all permissions for a role (bulk set).
+/// PUT /api/admin/rbac/roles/:role_id/permissions
+pub async fn set_role_permissions(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+    Json(payload): Json<SetRolePermissionsRequest>,
+) -> AppResult<StatusCode> {
+    ctx.require(perm::ROLE_MANAGE)?;
+
+    let role_uuid = uuid::Uuid::parse_str(&role_id)
+        .map_err(|_| AppError::BadRequest("Invalid role id".into()))?;
+
+    let mut tx = state.pool().begin().await?;
+
+    // Delete all existing assignments for this role
+    sqlx::query("DELETE FROM role_permissions WHERE role_id = $1")
+        .bind(role_uuid)
+        .execute(&mut *tx)
+        .await?;
+
+    // Insert new assignments (ignore unknown permission codes)
+    for code in &payload.permission_ids {
+        sqlx::query(
+            r#"
+            INSERT INTO role_permissions (role_id, permission_code)
+            SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM permissions WHERE code = $2)
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(role_uuid)
+        .bind(code)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    // Invalidate permission cache for all users holding this role
+    if let Ok(user_ids) = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT user_id FROM user_roles WHERE role_id = $1",
+    )
+    .bind(role_uuid)
+    .fetch_all(state.pool())
+    .await
+    {
+        for uid in user_ids {
+            crate::authz::invalidate_permission_cache(uid);
+        }
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
 
 /// List all roles + assignment status for a given user (admin UI).
 /// GET /api/admin/rbac/users/:user_id/roles?page=&limit=&search=

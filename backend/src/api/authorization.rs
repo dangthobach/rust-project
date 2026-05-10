@@ -3,22 +3,23 @@
 use axum::{extract::State, response::Json, Extension};
 use serde::Serialize;
 use sqlx::FromRow;
+use uuid::Uuid;
 
 use crate::app_state::AppState;
 use crate::authz::AuthContext;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct RoleRow {
-    pub id: String,
+    pub id: Uuid,
     pub slug: String,
     pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct BranchRow {
-    pub id: String,
-    pub parent_id: Option<String>,
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
     pub name: String,
     pub slug: String,
 }
@@ -36,6 +37,8 @@ pub async fn me_authorization(
     State(state): State<AppState>,
 ) -> AppResult<Json<MeAuthorizationResponse>> {
     let pool = state.pool();
+    let uid = Uuid::parse_str(&actor_id)
+        .map_err(|_| AppError::BadRequest("Invalid user ID".to_string()))?;
 
     let permissions: Vec<String> = ctx.permission_codes().iter().cloned().collect();
 
@@ -44,11 +47,11 @@ pub async fn me_authorization(
         SELECT r.id, r.slug, r.description
         FROM roles r
         INNER JOIN user_roles ur ON ur.role_id = r.id
-        WHERE ur.user_id = $1 AND r.is_active = 1
+        WHERE ur.user_id = $1 AND r.is_active = TRUE
         ORDER BY r.slug ASC
         "#,
     )
-    .bind(&actor_id)
+    .bind(uid)
     .fetch_all(pool)
     .await?;
 
@@ -57,11 +60,11 @@ pub async fn me_authorization(
         SELECT b.id, b.parent_id, b.name, b.slug
         FROM branches b
         INNER JOIN user_branches ub ON ub.branch_id = b.id
-        WHERE ub.user_id = $1 AND b.is_active = 1
+        WHERE ub.user_id = $1 AND b.is_active = TRUE
         ORDER BY b.name ASC
         "#,
     )
-    .bind(&actor_id)
+    .bind(uid)
     .fetch_all(pool)
     .await?;
 

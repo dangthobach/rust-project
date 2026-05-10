@@ -1,7 +1,7 @@
-import { Component, Show, JSX } from 'solid-js';
+import { Component, Show, JSX, createEffect } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
-import { createEffect } from 'solid-js';
 import { NO_AUTH } from '~/lib/env';
+import { isAuthenticated } from '~/lib/auth';
 
 interface ProtectedRouteProps {
   children: JSX.Element;
@@ -9,22 +9,18 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: Component<ProtectedRouteProps> = (props) => {
   const navigate = useNavigate();
-  
+
   createEffect(() => {
     if (NO_AUTH) return;
-    const token = localStorage.getItem('access_token');
-    if (!token) {
+    if (!isAuthenticated()) {
       navigate('/login', { replace: true });
     }
   });
 
-  const isAuthenticated = () => {
-    if (NO_AUTH) return true;
-    return !!localStorage.getItem('access_token');
-  };
+  const allowed = () => NO_AUTH || isAuthenticated();
 
   return (
-    <Show when={isAuthenticated()} fallback={null}>
+    <Show when={allowed()} fallback={null}>
       {props.children}
     </Show>
   );

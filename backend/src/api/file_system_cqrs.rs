@@ -593,7 +593,7 @@ pub async fn get_folder_tree(
     let cache_key = format!("folder_tree:{folder_id}");
     
     // Try to get from cache first
-    if let Some(mut redis_client) = state.redis_client.clone() {
+    if let Some(redis_client) = state.redis_client.clone() {
         if let Ok(mut conn) = redis_client.get_multiplexed_async_connection().await {
             use redis::AsyncCommands;
             let cached: redis::RedisResult<String> = conn.get(&cache_key).await;
@@ -615,7 +615,7 @@ pub async fn get_folder_tree(
     let tree = state.query_bus.dispatch_with_handler(query, h).await?;
     
     // Cache the result
-    if let Some(mut redis_client) = state.redis_client.clone() {
+    if let Some(redis_client) = state.redis_client.clone() {
         if let Ok(mut conn) = redis_client.get_multiplexed_async_connection().await {
             use redis::AsyncCommands;
             if let Ok(json_str) = serde_json::to_string(&tree) {

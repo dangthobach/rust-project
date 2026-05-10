@@ -22,7 +22,7 @@ use crate::utils::pagination::{PaginatedResponse, Pagination, PaginationParams};
 const FTS_TERM_MAX_BYTES: usize = 200;
 const FILE_ID_MAX_LEN: usize = 64;
 
-fn parse_file_id(raw: &str) -> AppResult<String> {
+fn parse_file_id(raw: &str) -> AppResult<Uuid> {
     let t = raw.trim();
     if t.is_empty() {
         return Err(AppError::BadRequest("File id is required".to_string()));
@@ -30,8 +30,7 @@ fn parse_file_id(raw: &str) -> AppResult<String> {
     if t.len() > FILE_ID_MAX_LEN {
         return Err(AppError::BadRequest("Invalid file id".to_string()));
     }
-    let u = Uuid::parse_str(t).map_err(|_| AppError::BadRequest("Invalid file id".to_string()))?;
-    Ok(u.to_string())
+    Uuid::parse_str(t).map_err(|_| AppError::BadRequest("Invalid file id".to_string()))
 }
 
 fn sanitize_fts_query(raw: &str) -> AppResult<String> {
@@ -84,7 +83,7 @@ pub async fn list_files(
     // Scope filter
     if !unrestricted {
         bind_values.push(uid.clone());
-        where_sql.push_str(&format!(" AND uploaded_by = ${}", bind_values.len()));
+        where_sql.push_str(&format!(" AND uploaded_by = ${}::uuid", bind_values.len()));
     }
 
     // Optional filters
@@ -111,7 +110,7 @@ pub async fn list_files(
         .filter(|s| !s.is_empty())
     {
         bind_values.push(client_id.to_string());
-        where_sql.push_str(&format!(" AND client_id = ${}", bind_values.len()));
+        where_sql.push_str(&format!(" AND client_id = ${}::uuid", bind_values.len()));
     }
 
     if let Some(task_id) = query
@@ -121,7 +120,7 @@ pub async fn list_files(
         .filter(|s| !s.is_empty())
     {
         bind_values.push(task_id.to_string());
-        where_sql.push_str(&format!(" AND task_id = ${}", bind_values.len()));
+        where_sql.push_str(&format!(" AND task_id = ${}::uuid", bind_values.len()));
     }
 
     let count_sql = format!("SELECT COUNT(*) FROM files {}", where_sql);
@@ -324,7 +323,7 @@ pub async fn upload_file(
         max,
     )?;
 
-    let file_id = Uuid::new_v4().to_string();
+    let file_id = Uuid::new_v4();
     let extension = std::path::Path::new(&safe_filename)
         .extension()
         .and_then(|e| e.to_str())
@@ -361,7 +360,7 @@ pub async fn upload_file(
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *"#,
     )
-    .bind(&file_id)
+    .bind(file_id)
     .bind(&object_name)
     .bind(&safe_filename)
     .bind(&file_path)
@@ -419,7 +418,7 @@ pub async fn get_file(
     let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -442,7 +441,7 @@ pub async fn download_file(
     let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -506,7 +505,7 @@ pub async fn get_download_url(
     let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -543,7 +542,7 @@ pub async fn get_thumbnail_url(
     let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -585,7 +584,7 @@ pub async fn delete_file(
     let pool = state.pool();
     let id = parse_file_id(&id)?;
     let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -598,7 +597,7 @@ pub async fn delete_file(
     }
 
     sqlx::query("DELETE FROM files WHERE id = $1")
-        .bind(&id)
+        .bind(id)
         .execute(pool)
         .await?;
 

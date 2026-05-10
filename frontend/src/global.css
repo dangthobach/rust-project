@@ -43,12 +43,12 @@
 @layer components {
   /* Brutal Button Styles */
   .btn {
-    @apply inline-flex items-center justify-center px-6 py-3 font-heading font-bold uppercase;
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-heading font-bold uppercase;
     @apply border-3 border-black bg-white text-black shadow-brutal;
     @apply transition-all duration-150 ease-in-out;
-    @apply hover:-translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg;
-    @apply active:translate-x-0 active:translate-y-0 active:shadow-none;
-    @apply disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0;
+    @apply hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal-lg;
+    @apply active:translate-x-0 active:translate-y-0 active:shadow-brutal-sm;
+    @apply disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-brutal;
   }
 
   .btn-primary {
@@ -64,16 +64,20 @@
   }
 
   .btn-ghost {
-    @apply px-4 py-2 font-heading font-bold uppercase transition-colors;
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-heading font-bold uppercase transition-colors;
     @apply hover:bg-neutral-beige;
   }
 
+  .btn-xs {
+    @apply px-2 py-1 text-xs shadow-brutal-sm hover:shadow-brutal;
+  }
+
   .btn-sm {
-    @apply px-4 py-2 text-sm shadow-brutal-sm hover:shadow-brutal;
+    @apply px-3 py-1.5 text-sm shadow-brutal-sm hover:shadow-brutal;
   }
 
   .btn-lg {
-    @apply px-8 py-4 text-lg shadow-brutal-lg hover:shadow-brutal-xl;
+    @apply px-6 py-3 text-base shadow-brutal-lg hover:shadow-brutal-xl;
   }
 
   /* Brutal Card Styles (Industrial: 3px border, hard shadow) */
@@ -96,9 +100,9 @@
 
   /* Brutal Input Styles */
   .input {
-    @apply w-full border-3 border-black bg-white px-4 py-3 font-body;
+    @apply w-full border-3 border-black bg-white px-3 py-2 text-sm font-body;
     @apply transition-all duration-150;
-    @apply focus:outline-none focus:ring-0 focus:-translate-x-0.5 focus:-translate-y-0.5 focus:shadow-brutal-sm;
+    @apply focus:outline-none focus:ring-0 focus:shadow-brutal-sm;
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
 
@@ -107,7 +111,7 @@
   }
 
   .textarea {
-    @apply input min-h-[120px] resize-y;
+    @apply input min-h-[100px] resize-y;
   }
 
   .select {
@@ -121,7 +125,7 @@
 
   /* Brutal Checkbox & Radio */
   .checkbox {
-    @apply h-6 w-6 appearance-none border-3 border-black bg-white;
+    @apply h-5 w-5 appearance-none border-3 border-black bg-white;
     @apply transition-all duration-150;
     @apply checked:bg-primary checked:shadow-brutal-sm;
     @apply focus:outline-none focus:ring-0 focus:shadow-brutal-sm;
@@ -134,7 +138,7 @@
 
   /* Brutal Badge */
   .badge {
-    @apply inline-flex items-center border-2 border-black px-3 py-1 text-xs font-bold uppercase;
+    @apply inline-flex items-center border-2 border-black px-2 py-0.5 text-xs font-bold uppercase;
   }
 
   .badge-primary {

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -11,19 +12,19 @@ use crate::error::AppError;
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct RoleDto {
-    pub id: String,
+    pub id: Uuid,
     pub slug: String,
     pub description: Option<String>,
-    pub is_active: i64,
-    pub created_at: String,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct PermissionDto {
     pub code: String,
     pub description: Option<String>,
-    pub is_active: i64,
-    pub created_at: String,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 fn validate_slug(slug: &str) -> Result<String, AppError> {
@@ -59,8 +60,8 @@ impl CommandHandler<CreateRoleCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: CreateRoleCommand) -> Result<RoleDto, Self::Error> {
         let slug = validate_slug(&c.slug)?;
-        let role = sqlx::query_as::<_, RoleDto>("INSERT INTO roles (id, slug, description, is_active) VALUES ($1, $2, $3, 1) RETURNING *")
-            .bind(Uuid::new_v4().to_string()).bind(slug).bind(c.description)
+        let role = sqlx::query_as::<_, RoleDto>("INSERT INTO roles (id, slug, description, is_active) VALUES ($1, $2, $3, TRUE) RETURNING *")
+            .bind(Uuid::new_v4()).bind(slug).bind(c.description)
             .fetch_one(&*self.pool).await?;
         invalidate_all_permission_cache();
         Ok(role)
@@ -71,13 +72,16 @@ impl CommandHandler<CreateRoleCommand> for RbacCommandHandler {
 impl CommandHandler<UpdateRoleCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: UpdateRoleCommand) -> Result<RoleDto, Self::Error> {
-        let exists: Option<String> = sqlx::query_scalar("SELECT id FROM roles WHERE id = $1").bind(&c.role_id).fetch_optional(&*self.pool).await?;
-        if exists.is_none() { return Err(AppError::NotFound("Role not found".to_string())); }
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
+        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM roles WHERE id = $1")
+            .bind(role_uuid).fetch_one(&*self.pool).await?;
+        if exists == 0 { return Err(AppError::NotFound("Role not found".to_string())); }
         let slug = match c.slug { Some(s) => Some(validate_slug(&s)?), None => None };
         sqlx::query("UPDATE roles SET slug = COALESCE($1, slug), description = COALESCE($2, description), is_active = COALESCE($3, is_active) WHERE id = $4")
-            .bind(slug).bind(c.description).bind(c.is_active.map(|v| if v {1} else {0})).bind(&c.role_id)
+            .bind(slug).bind(c.description).bind(c.is_active).bind(role_uuid)
             .execute(&*self.pool).await?;
-        let role = sqlx::query_as::<_, RoleDto>("SELECT * FROM roles WHERE id = $1").bind(&c.role_id).fetch_one(&*self.pool).await?;
+        let role = sqlx::query_as::<_, RoleDto>("SELECT * FROM roles WHERE id = $1").bind(role_uuid).fetch_one(&*self.pool).await?;
         invalidate_all_permission_cache();
         Ok(role)
     }
@@ -87,7 +91,9 @@ impl CommandHandler<UpdateRoleCommand> for RbacCommandHandler {
 impl CommandHandler<DeleteRoleCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: DeleteRoleCommand) -> Result<(), Self::Error> {
-        let r = sqlx::query("DELETE FROM roles WHERE id = $1").bind(&c.role_id).execute(&*self.pool).await?;
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
+        let r = sqlx::query("DELETE FROM roles WHERE id = $1").bind(role_uuid).execute(&*self.pool).await?;
         if r.rows_affected() == 0 { return Err(AppError::NotFound("Role not found".to_string())); }
         invalidate_all_permission_cache();
         Ok(())
@@ -99,7 +105,7 @@ impl CommandHandler<CreatePermissionCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: CreatePermissionCommand) -> Result<PermissionDto, Self::Error> {
         let code = validate_permission_code(&c.code)?;
-        let p = sqlx::query_as::<_, PermissionDto>("INSERT INTO permissions (code, description, is_active) VALUES ($1, $2, 1) RETURNING *")
+        let p = sqlx::query_as::<_, PermissionDto>("INSERT INTO permissions (code, description, is_active) VALUES ($1, $2, TRUE) RETURNING *")
             .bind(code).bind(c.description).fetch_one(&*self.pool).await?;
         invalidate_all_permission_cache();
         Ok(p)
@@ -114,7 +120,7 @@ impl CommandHandler<UpdatePermissionCommand> for RbacCommandHandler {
         let exists: Option<String> = sqlx::query_scalar("SELECT code FROM permissions WHERE code = $1").bind(&code).fetch_optional(&*self.pool).await?;
         if exists.is_none() { return Err(AppError::NotFound("Permission not found".to_string())); }
         sqlx::query("UPDATE permissions SET description = COALESCE($1, description), is_active = COALESCE($2, is_active) WHERE code = $3")
-            .bind(c.description).bind(c.is_active.map(|v| if v {1} else {0})).bind(&code)
+            .bind(c.description).bind(c.is_active).bind(&code)
             .execute(&*self.pool).await?;
         let p = sqlx::query_as::<_, PermissionDto>("SELECT * FROM permissions WHERE code = $1").bind(&code).fetch_one(&*self.pool).await?;
         invalidate_all_permission_cache();
@@ -138,9 +144,11 @@ impl CommandHandler<DeletePermissionCommand> for RbacCommandHandler {
 impl CommandHandler<AssignPermissionToRoleCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: AssignPermissionToRoleCommand) -> Result<(), Self::Error> {
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
         let code = validate_permission_code(&c.code)?;
         sqlx::query("INSERT INTO role_permissions (role_id, permission_code) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-            .bind(&c.role_id).bind(&code).execute(&*self.pool).await?;
+            .bind(role_uuid).bind(&code).execute(&*self.pool).await?;
         invalidate_all_permission_cache();
         Ok(())
     }
@@ -150,9 +158,11 @@ impl CommandHandler<AssignPermissionToRoleCommand> for RbacCommandHandler {
 impl CommandHandler<RevokePermissionFromRoleCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: RevokePermissionFromRoleCommand) -> Result<(), Self::Error> {
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
         let code = validate_permission_code(&c.code)?;
         sqlx::query("DELETE FROM role_permissions WHERE role_id = $1 AND permission_code = $2")
-            .bind(&c.role_id).bind(&code).execute(&*self.pool).await?;
+            .bind(role_uuid).bind(&code).execute(&*self.pool).await?;
         invalidate_all_permission_cache();
         Ok(())
     }
@@ -162,9 +172,12 @@ impl CommandHandler<RevokePermissionFromRoleCommand> for RbacCommandHandler {
 impl CommandHandler<AssignRoleToUserCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: AssignRoleToUserCommand) -> Result<(), Self::Error> {
-        let user_uuid = Uuid::parse_str(&c.user_id).map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
+        let user_uuid = Uuid::parse_str(&c.user_id)
+            .map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
         sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-            .bind(&c.user_id).bind(&c.role_id).execute(&*self.pool).await?;
+            .bind(user_uuid).bind(role_uuid).execute(&*self.pool).await?;
         invalidate_permission_cache(user_uuid);
         Ok(())
     }
@@ -174,9 +187,12 @@ impl CommandHandler<AssignRoleToUserCommand> for RbacCommandHandler {
 impl CommandHandler<RevokeRoleFromUserCommand> for RbacCommandHandler {
     type Error = AppError;
     async fn handle(&self, c: RevokeRoleFromUserCommand) -> Result<(), Self::Error> {
-        let user_uuid = Uuid::parse_str(&c.user_id).map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
+        let user_uuid = Uuid::parse_str(&c.user_id)
+            .map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
+        let role_uuid = Uuid::parse_str(&c.role_id)
+            .map_err(|_| AppError::ValidationError("role_id must be UUID".to_string()))?;
         sqlx::query("DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2")
-            .bind(&c.user_id).bind(&c.role_id).execute(&*self.pool).await?;
+            .bind(user_uuid).bind(role_uuid).execute(&*self.pool).await?;
         invalidate_permission_cache(user_uuid);
         Ok(())
     }

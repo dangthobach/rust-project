@@ -1,8 +1,9 @@
-import { Component, createEffect, createSignal, Show, JSX } from 'solid-js';
+import { Component, createEffect, createSignal, Show, JSX, For, createMemo } from 'solid-js';
 import { A, useLocation } from '@solidjs/router';
 import AppShellHeader from './AppShellHeader';
 import ToastContainer from './ToastContainer';
-import { NO_AUTH } from '~/lib/env';
+import { useMyMenus } from '~/lib/hooks/useMenus';
+import type { MenuNode } from '~/lib/api';
 
 const IconDashboard = () => (
   <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24" aria-hidden="true">
@@ -89,6 +90,59 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
     ].join(' ');
   };
 
+  const menus = useMyMenus();
+
+  // Map icon key → SVG/emoji for rendering
+  function renderIcon(icon: string | null): JSX.Element {
+    const map: Record<string, JSX.Element> = {
+      dashboard: <IconDashboard />,
+      clients:   <IconClients />,
+      tasks:     <IconTasks />,
+      reports:   <IconReports />,
+      bell:      <span class="text-base" aria-hidden="true">🔔</span>,
+      files:     <span class="text-base" aria-hidden="true">📁</span>,
+      shield:    <span class="text-base" aria-hidden="true">🛡️</span>,
+      key:       <span class="text-base" aria-hidden="true">🔑</span>,
+      grid:      <span class="text-base" aria-hidden="true">⊞</span>,
+      'user-cog':<span class="text-base" aria-hidden="true">👤</span>,
+      users:     <span class="text-base" aria-hidden="true">👥</span>,
+    };
+    return map[icon ?? ''] ?? <span class="w-5 h-5 shrink-0" />;
+  }
+
+  // Render a single leaf menu item
+  const NavItem: Component<{ item: MenuNode }> = (itemProps) => (
+    <A
+      href={itemProps.item.path ?? '#'}
+      class={navClass(itemProps.item.path ?? '')}
+      onClick={() => setMobileOpen(false)}
+      title={itemProps.item.label}
+    >
+      {renderIcon(itemProps.item.icon)}
+      <Show when={!sidebarCollapsed()}>
+        <span>{itemProps.item.label}</span>
+      </Show>
+    </A>
+  );
+
+  // Render a group (parent with children)
+  const NavGroup: Component<{ item: MenuNode }> = (groupProps) => (
+    <div class="mt-2 border-t-3 border-black pt-3">
+      <Show when={!sidebarCollapsed()}>
+        <div class="mb-2 font-heading text-[10px] font-black uppercase tracking-widest text-neutral-darkGray">
+          {groupProps.item.label}
+        </div>
+      </Show>
+      <div class="flex flex-col gap-2">
+        <For each={groupProps.item.children}>
+          {(child) => <NavItem item={child} />}
+        </For>
+      </div>
+    </div>
+  );
+
+  const rootItems = createMemo(() => menus.data ?? []);
+
   const SidebarInner = () => (
     <>
       <div class="mb-6 flex items-start justify-between gap-2">
@@ -117,95 +171,17 @@ const Layout: Component<{ children?: JSX.Element }> = (props) => {
       </div>
 
       <nav class="flex flex-col gap-2">
-        <A href="/" class={navClass('/')} onClick={() => setMobileOpen(false)} title="Dashboard">
-          <IconDashboard />
-          <Show when={!sidebarCollapsed()}>
-            <span>Dashboard</span>
-          </Show>
-        </A>
-        <A href="/clients" class={navClass('/clients')} onClick={() => setMobileOpen(false)} title="Clients">
-          <IconClients />
-          <Show when={!sidebarCollapsed()}>
-            <span>Clients</span>
-          </Show>
-        </A>
-        <A href="/tasks" class={navClass('/tasks')} onClick={() => setMobileOpen(false)} title="Tasks">
-          <IconTasks />
-          <Show when={!sidebarCollapsed()}>
-            <span>Tasks</span>
-          </Show>
-        </A>
-        <A href="/reports" class={navClass('/reports')} onClick={() => setMobileOpen(false)} title="Reports">
-          <IconReports />
-          <Show when={!sidebarCollapsed()}>
-            <span>Reports</span>
-          </Show>
-        </A>
-        <Show when={NO_AUTH}>
-          <div class="mt-2 border-t-3 border-black pt-3">
-            <div class="mb-2 font-heading text-[10px] font-black uppercase tracking-widest text-neutral-darkGray">
-              Admin
-            </div>
-            <div class="flex flex-col gap-2">
-              <A
-                href="/admin/rbac/roles"
-                class={navClass('/admin/rbac/roles')}
-                onClick={() => setMobileOpen(false)}
-                title="RBAC Roles"
-              >
-                <span class="text-base" aria-hidden="true">
-                  🛡️
-                </span>
-                <Show when={!sidebarCollapsed()}>
-                  <span>RBAC Roles</span>
-                </Show>
-              </A>
-              <A
-                href="/admin/rbac/permissions"
-                class={navClass('/admin/rbac/permissions')}
-                onClick={() => setMobileOpen(false)}
-                title="RBAC Permissions"
-              >
-                <span class="text-base" aria-hidden="true">
-                  🔑
-                </span>
-                <Show when={!sidebarCollapsed()}>
-                  <span>RBAC Permissions</span>
-                </Show>
-              </A>
-            </div>
-          </div>
-        </Show>
+        <For each={rootItems()}>
+          {(item) => (
+            <Show
+              when={item.children.length > 0}
+              fallback={<NavItem item={item} />}
+            >
+              <NavGroup item={item} />
+            </Show>
+          )}
+        </For>
       </nav>
-
-      <div class="mt-4 flex flex-col gap-2 border-t-3 border-black pt-4">
-        <A
-          href="/notifications"
-          class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline hover:bg-ledger-pale border-2 border-transparent hover:border-black"
-          onClick={() => setMobileOpen(false)}
-          title="Alerts"
-        >
-          <span class="text-base" aria-hidden="true">
-            🔔
-          </span>
-          <Show when={!sidebarCollapsed()}>
-            <span>Alerts</span>
-          </Show>
-        </A>
-        <A
-          href="/files"
-          class="flex items-center gap-3 px-3 py-2 font-heading font-bold text-xs uppercase text-black no-underline hover:bg-ledger-pale border-2 border-transparent hover:border-black"
-          onClick={() => setMobileOpen(false)}
-          title="Files"
-        >
-          <span class="text-base" aria-hidden="true">
-            📁
-          </span>
-          <Show when={!sidebarCollapsed()}>
-            <span>Files</span>
-          </Show>
-        </A>
-      </div>
 
       <div class="flex-1 min-h-4" />
 

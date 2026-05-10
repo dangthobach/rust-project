@@ -34,15 +34,15 @@ pub async fn load_effective_permissions(
         SELECT DISTINCT p.code
         FROM user_roles ur
         INNER JOIN roles r
-            ON r.id = ur.role_id AND r.is_active = 1
+            ON r.id = ur.role_id AND r.is_active = TRUE
         INNER JOIN role_permissions rp
             ON rp.role_id = r.id
         INNER JOIN permissions p
-            ON p.code = rp.permission_code AND p.is_active = 1
+            ON p.code = rp.permission_code AND p.is_active = TRUE
         WHERE ur.user_id = $1
         "#,
     )
-    .bind(user_id.to_string())
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
 

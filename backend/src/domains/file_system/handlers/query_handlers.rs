@@ -31,7 +31,7 @@ impl QueryHandler<GetFileQuery> for GetFileHandler {
             WHERE id = $1 AND deleted_at IS NULL
         "#,
         )
-        .bind(query.file_id.to_string())
+        .bind(query.file_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -57,7 +57,6 @@ impl QueryHandler<ListFilesQuery> for ListFilesHandler {
     async fn handle(&self, query: ListFilesQuery) -> Result<Vec<FileView>, Self::Error> {
         use crate::domains::file_system::read_models::FileViewRow;
         
-        let parent_id_str = query.parent_id.map(|id| id.to_string());
         let rows: Vec<FileViewRow> = sqlx::query_as(
             r#"
             SELECT id, name, path, parent_id, size, mime_type, owner_id, item_type,
@@ -68,7 +67,7 @@ impl QueryHandler<ListFilesQuery> for ListFilesHandler {
             LIMIT $2 OFFSET $3
         "#,
         )
-        .bind(&parent_id_str)
+        .bind(query.parent_id)
         .bind(query.pagination.limit())
         .bind(query.pagination.offset())
         .fetch_all(&self.pool)
@@ -105,7 +104,7 @@ impl QueryHandler<GetFolderTreeQuery> for GetFolderTreeHandler {
             WHERE id = $1 AND item_type = 'folder' AND deleted_at IS NULL
         "#,
         )
-        .bind(query.folder_id.to_string())
+        .bind(query.folder_id)
         .fetch_one(&self.pool)
         .await?;
         
@@ -144,7 +143,7 @@ impl GetFolderTreeHandler {
                 ORDER BY name ASC
             "#,
             )
-            .bind(parent_id.to_string())
+            .bind(parent_id)
             .fetch_all(&self.pool)
             .await?;
             

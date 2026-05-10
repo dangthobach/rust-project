@@ -11,7 +11,6 @@ pub struct User {
     #[serde(skip_serializing)]
     pub password_hash: String,
     pub full_name: String,
-    pub role: String,
     pub avatar_url: Option<String>,
     pub is_active: bool,
     pub status: String,

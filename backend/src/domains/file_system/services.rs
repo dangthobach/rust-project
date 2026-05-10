@@ -41,7 +41,7 @@ impl FileSystemService {
             let parent_path: Option<(String,)> = sqlx::query_as(
                 "SELECT path FROM file_views WHERE id = $1 AND item_type = 'folder'",
             )
-            .bind(parent_id.to_string())
+            .bind(parent_id)
             .fetch_optional(&self.pool)
             .await?;
 
@@ -66,15 +66,13 @@ impl FileSystemService {
         parent_id: Option<Uuid>,
         exclude_id: Option<Uuid>,
     ) -> Result<bool, sqlx::Error> {
-        let parent_id_str = parent_id.map(|id| id.to_string());
-        
         let exists: Option<i64> = if let Some(exclude_id) = exclude_id {
             sqlx::query_scalar(
                 "SELECT COUNT(*) FROM file_views WHERE name = $1 AND (parent_id = $2 OR (parent_id IS NULL AND $2 IS NULL)) AND id != $3 AND deleted_at IS NULL",
             )
             .bind(name)
-            .bind(&parent_id_str)
-            .bind(exclude_id.to_string())
+            .bind(parent_id)
+            .bind(exclude_id)
             .fetch_optional(&self.pool)
             .await?
         } else {
@@ -82,7 +80,7 @@ impl FileSystemService {
                 "SELECT COUNT(*) FROM file_views WHERE name = $1 AND (parent_id = $2 OR (parent_id IS NULL AND $2 IS NULL)) AND deleted_at IS NULL",
             )
             .bind(name)
-            .bind(&parent_id_str)
+            .bind(parent_id)
             .fetch_optional(&self.pool)
             .await?
         };
@@ -98,16 +96,14 @@ impl FileSystemService {
         permission: crate::core::shared::Permission,
     ) -> Result<bool, sqlx::Error> {
         // Check if user is owner
-        let owner: Option<String> = sqlx::query_scalar(
+        let owner: Option<Uuid> = sqlx::query_scalar(
             "SELECT owner_id FROM file_views WHERE id = $1",
         )
-        .bind(file_id.to_string())
+        .bind(file_id)
         .fetch_optional(&self.pool)
         .await?;
         
-        let owner_id = owner.and_then(|s| Uuid::parse_str(&s).ok());
-
-        if let Some(oid) = owner_id {
+        if let Some(oid) = owner {
             if oid == user_id {
                 return Ok(true); // Owner has all permissions
             }
@@ -129,8 +125,8 @@ impl FileSystemService {
             AND permission IN ($3, 'admin')
         "#,
         )
-        .bind(file_id.to_string())
-        .bind(user_id.to_string())
+        .bind(file_id)
+        .bind(user_id)
         .bind(&permission_str)
         .fetch_optional(&self.pool)
         .await?;

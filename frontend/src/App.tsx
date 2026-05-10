@@ -25,6 +25,7 @@ import RbacRoles from './pages/RbacRoles';
 import RbacPermissions from './pages/RbacPermissions';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import { RoleList, RoleDetail, RoleCreate, RoleEdit, PermissionMatrix, UserRoleList } from './features/rbac';
 
 const App: Component = () => {
   return (
@@ -150,8 +151,9 @@ const App: Component = () => {
           </AdminRoute>
         )}
       />
+      {/* Legacy routes — kept for compatibility */}
       <Route
-        path="/admin/rbac/roles"
+        path="/admin/rbac/roles-legacy"
         component={() => (
           <AdminRoute>
             <Layout>
@@ -166,6 +168,68 @@ const App: Component = () => {
           <AdminRoute>
             <Layout>
               <RbacPermissions />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+
+      {/* ── RBAC feature routes ── */}
+      <Route
+        path="/admin/rbac/roles"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RoleList />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/roles/new"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RoleCreate />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/roles/:id"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RoleDetail />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/roles/:id/edit"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <RoleEdit />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/matrix"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <PermissionMatrix />
+            </Layout>
+          </AdminRoute>
+        )}
+      />
+      <Route
+        path="/admin/rbac/user-roles"
+        component={() => (
+          <AdminRoute>
+            <Layout>
+              <UserRoleList />
             </Layout>
           </AdminRoute>
         )}

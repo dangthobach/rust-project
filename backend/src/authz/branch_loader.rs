@@ -32,15 +32,14 @@ pub async fn load_accessible_branch_ids(
         }
     }
 
-    let uid = user_id.to_string();
-    let rows = sqlx::query_scalar::<_, String>(
+    let rows = sqlx::query_scalar::<_, Uuid>(
         r#"
         WITH RECURSIVE seeds AS (
             SELECT b.id
             FROM branches b
             INNER JOIN user_branches ub
                 ON ub.branch_id = b.id AND ub.user_id = $1
-            WHERE b.is_active = 1
+            WHERE b.is_active = TRUE
         ),
         subtree AS (
             SELECT id FROM seeds
@@ -48,16 +47,16 @@ pub async fn load_accessible_branch_ids(
             SELECT b.id
             FROM branches b
             INNER JOIN subtree s ON b.parent_id = s.id
-            WHERE b.is_active = 1
+            WHERE b.is_active = TRUE
         )
         SELECT DISTINCT id FROM subtree
         "#,
     )
-    .bind(&uid)
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
 
-    let set: BTreeSet<String> = rows.into_iter().collect();
+    let set: BTreeSet<String> = rows.into_iter().map(|id| id.to_string()).collect();
     let arc = Arc::new(set);
     BRANCH_CACHE.insert(
         user_id,

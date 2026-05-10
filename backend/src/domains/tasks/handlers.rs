@@ -134,8 +134,11 @@ impl CommandHandler<UpdateTaskCommand> for UpdateTaskHandler {
             return Err(AppError::ValidationError("No fields to update".to_string()));
         }
 
+        let id_uuid = Uuid::parse_str(&command.id)
+            .map_err(|_| AppError::ValidationError("Invalid task ID".to_string()))?;
+
         let before = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Task not found".to_string()))?;
@@ -181,13 +184,20 @@ impl CommandHandler<UpdateTaskCommand> for UpdateTaskHandler {
                 .push_bind(normalize_priority(Some(priority.as_str()))?);
         }
         if let Some(assigned_to) = &command.assigned_to {
-            separated.push("assigned_to = ").push_bind(assigned_to);
+            let uid = Uuid::parse_str(assigned_to)
+                .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
+            separated.push("assigned_to = ").push_bind(uid);
         }
         if let Some(client_id) = &command.client_id {
-            separated.push("client_id = ").push_bind(client_id);
+            let cid = Uuid::parse_str(client_id)
+                .map_err(|_| AppError::ValidationError("client_id must be UUID".to_string()))?;
+            separated.push("client_id = ").push_bind(cid);
             let bid = resolve_task_branch_id(&self.pool, Some(client_id)).await?;
             data_scope::ensure_branch_allowed(&command.data_scope, &bid)?;
-            separated.push("branch_id = ").push_bind(bid);
+            let bid_uuid = Uuid::parse_str(&bid).unwrap_or_else(|_| {
+                Uuid::parse_str(data_scope::ROOT_BRANCH_ID).expect("root branch uuid")
+            });
+            separated.push("branch_id = ").push_bind(bid_uuid);
         }
         if let Some(due_date) = &command.due_date {
             separated.push("due_date = ").push_bind(due_date);
@@ -195,11 +205,11 @@ impl CommandHandler<UpdateTaskCommand> for UpdateTaskHandler {
         separated.push("updated_at = NOW()");
         drop(separated);
 
-        qb.push(" WHERE id = ").push_bind(&command.id);
+        qb.push(" WHERE id = ").push_bind(id_uuid);
         qb.build().execute(&*self.pool).await?;
 
         let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_one(&*self.pool)
             .await?;
 
@@ -249,8 +259,11 @@ impl CommandHandler<DeleteTaskCommand> for DeleteTaskHandler {
     type Error = AppError;
 
     async fn handle(&self, command: DeleteTaskCommand) -> Result<(), Self::Error> {
+        let id_uuid = Uuid::parse_str(&command.id)
+            .map_err(|_| AppError::ValidationError("Invalid task ID".to_string()))?;
+
         let existing = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Task not found".to_string()))?;
@@ -282,7 +295,7 @@ impl CommandHandler<DeleteTaskCommand> for DeleteTaskHandler {
         .await?;
 
         let result = sqlx::query("DELETE FROM tasks WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .execute(&*self.pool)
             .await?;
 
@@ -309,8 +322,11 @@ impl CommandHandler<CompleteTaskCommand> for CompleteTaskHandler {
     type Error = AppError;
 
     async fn handle(&self, command: CompleteTaskCommand) -> Result<Task, Self::Error> {
+        let id_uuid = Uuid::parse_str(&command.id)
+            .map_err(|_| AppError::ValidationError("Invalid task ID".to_string()))?;
+
         let before = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
-            .bind(&command.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Task not found".to_string()))?;
@@ -329,7 +345,7 @@ impl CommandHandler<CompleteTaskCommand> for CompleteTaskHandler {
         let task = sqlx::query_as::<_, Task>(
             "UPDATE tasks SET status = 'done', completed_at = NOW() WHERE id = $1 RETURNING *"
         )
-        .bind(&command.id)
+        .bind(id_uuid)
         .fetch_one(&*self.pool)
         .await?;
 
@@ -369,8 +385,11 @@ impl QueryHandler<GetTaskQuery> for GetTaskHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetTaskQuery) -> Result<Option<Task>, Self::Error> {
+        let id_uuid = Uuid::parse_str(&query.id)
+            .map_err(|_| AppError::ValidationError("Invalid task ID".to_string()))?;
+
         let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
-            .bind(&query.id)
+            .bind(id_uuid)
             .fetch_optional(&*self.pool)
             .await?;
 
@@ -415,10 +434,14 @@ fn push_list_tasks_filters<'a>(
             .push_bind(normalize_priority(Some(priority.as_str()))?);
     }
     if let Some(assigned_to) = &query.assigned_to {
-        qb.push(" AND assigned_to = ").push_bind(assigned_to);
+        let uid = Uuid::parse_str(assigned_to)
+            .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
+        qb.push(" AND assigned_to = ").push_bind(uid);
     }
     if let Some(client_id) = &query.client_id {
-        qb.push(" AND client_id = ").push_bind(client_id);
+        let cid = Uuid::parse_str(client_id)
+            .map_err(|_| AppError::ValidationError("client_id must be UUID".to_string()))?;
+        qb.push(" AND client_id = ").push_bind(cid);
     }
 
     if query.due_today.unwrap_or(false) {
@@ -477,8 +500,10 @@ impl QueryHandler<GetTasksByUserQuery> for GetTasksByUserHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetTasksByUserQuery) -> Result<Vec<Task>, Self::Error> {
+        let user_uuid = Uuid::parse_str(&query.user_id)
+            .map_err(|_| AppError::ValidationError("user_id must be UUID".to_string()))?;
         let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM tasks WHERE assigned_to = ");
-        qb.push_bind(&query.user_id);
+        qb.push_bind(user_uuid);
         if let Some(status) = &query.status {
             qb.push(" AND status = ")
                 .push_bind(normalize_status(Some(status.as_str()))?);
@@ -509,8 +534,10 @@ impl QueryHandler<GetTasksByClientQuery> for GetTasksByClientHandler {
     type Error = AppError;
 
     async fn handle(&self, query: GetTasksByClientQuery) -> Result<Vec<Task>, Self::Error> {
+        let client_uuid = Uuid::parse_str(&query.client_id)
+            .map_err(|_| AppError::ValidationError("client_id must be UUID".to_string()))?;
         let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM tasks WHERE client_id = ");
-        qb.push_bind(&query.client_id);
+        qb.push_bind(client_uuid);
         data_scope::push_task_scope_filter(
             &mut qb,
             &query.data_scope,
@@ -563,10 +590,10 @@ fn normalize_priority(priority: Option<&str>) -> Result<String, AppError> {
 }
 
 async fn validate_user_exists(pool: &PgPool, user_id: &str) -> Result<(), AppError> {
-    Uuid::parse_str(user_id)
+    let uid = Uuid::parse_str(user_id)
         .map_err(|_| AppError::ValidationError("assigned_to must be UUID".to_string()))?;
     let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = $1")
-        .bind(user_id)
+        .bind(uid)
         .fetch_one(pool)
         .await?;
     if exists == 0 {
@@ -576,10 +603,10 @@ async fn validate_user_exists(pool: &PgPool, user_id: &str) -> Result<(), AppErr
 }
 
 async fn validate_client_exists(pool: &PgPool, client_id: &str) -> Result<(), AppError> {
-    Uuid::parse_str(client_id)
+    let cid = Uuid::parse_str(client_id)
         .map_err(|_| AppError::ValidationError("client_id must be UUID".to_string()))?;
     let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM clients WHERE id = $1")
-        .bind(client_id)
+        .bind(cid)
         .fetch_one(pool)
         .await?;
     if exists == 0 {
