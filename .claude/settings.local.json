@@ -23,7 +23,10 @@
       "Bash(xargs cat)",
       "PowerShell(Get-Process -Name \"crm-backend\" -ErrorAction SilentlyContinue)",
       "PowerShell(Stop-Process -Force)",
-      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(npx tsc *)",
+      "PowerShell(Start-Process -FilePath \"D:\\\\project\\\\rust-system\\\\backend\\\\target\\\\debug\\\\crm-backend.exe\" -WorkingDirectory \"D:\\\\project\\\\rust-system\\\\backend\" -WindowStyle Hidden)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:3000/health\" -ErrorAction SilentlyContinue)"
     ],
     "deny": [],
     "ask": []

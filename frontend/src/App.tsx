@@ -31,86 +31,160 @@ const App: Component = () => {
   return (
     <>
       <Route path="/login" component={Login} />
+
+      {/* Protected user routes */}
       <Route
         path="/"
         component={() => (
-          <Layout>
-            <Dashboard />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Dashboard />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/clients"
         component={() => (
-          <Layout>
-            <Clients />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Clients />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/clients/new"
         component={() => (
-          <Layout>
-            <ClientCreate />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <ClientCreate />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/clients/:id"
         component={() => (
-          <Layout>
-            <ClientDetail />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <ClientDetail />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/clients/:id/edit"
         component={() => (
-          <Layout>
-            <ClientEdit />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <ClientEdit />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/tasks"
         component={() => (
-          <Layout>
-            <Tasks />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <Tasks />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/tasks/:id"
         component={() => (
-          <Layout>
-            <TaskDetail />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <TaskDetail />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/tasks/new"
         component={() => (
-          <Layout>
-            <TaskCreate />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <TaskCreate />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/tasks/:id/edit"
         component={() => (
-          <Layout>
-            <TaskEdit />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <TaskEdit />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
       <Route
         path="/profile"
         component={() => (
-          <Layout>
-            <UserProfile />
-          </Layout>
+          <ProtectedRoute>
+            <Layout>
+              <UserProfile />
+            </Layout>
+          </ProtectedRoute>
         )}
       />
+      <Route
+        path="/reports"
+        component={() => (
+          <ProtectedRoute>
+            <Layout>
+              <Reports />
+            </Layout>
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/search"
+        component={() => (
+          <ProtectedRoute>
+            <Layout>
+              <Search />
+            </Layout>
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/notifications"
+        component={() => (
+          <ProtectedRoute>
+            <Layout>
+              <Notifications />
+            </Layout>
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/files/:id"
+        component={() => (
+          <ProtectedRoute>
+            <Layout>
+              <FileDetail />
+            </Layout>
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/files"
+        component={() => (
+          <ProtectedRoute>
+            <Layout>
+              <Files />
+            </Layout>
+          </ProtectedRoute>
+        )}
+      />
+
+      {/* Admin-only routes */}
       <Route
         path="/users-management"
         component={() => (
@@ -151,7 +225,6 @@ const App: Component = () => {
           </AdminRoute>
         )}
       />
-      {/* Legacy routes — kept for compatibility */}
       <Route
         path="/admin/rbac/roles-legacy"
         component={() => (
@@ -172,8 +245,6 @@ const App: Component = () => {
           </AdminRoute>
         )}
       />
-
-      {/* ── RBAC feature routes ── */}
       <Route
         path="/admin/rbac/roles"
         component={() => (
@@ -234,50 +305,8 @@ const App: Component = () => {
           </AdminRoute>
         )}
       />
-      <Route
-        path="/reports"
-        component={() => (
-          <Layout>
-            <Reports />
-          </Layout>
-        )}
-      />
-      <Route
-        path="/search"
-        component={() => (
-          <Layout>
-            <Search />
-          </Layout>
-        )}
-      />
-      <Route
-        path="/notifications"
-        component={() => (
-          <Layout>
-            <Notifications />
-          </Layout>
-        )}
-      />
-      <Route
-        path="/files/:id"
-        component={() => (
-          <Layout>
-            <FileDetail />
-          </Layout>
-        )}
-      />
-      <Route
-        path="/files"
-        component={() => (
-          <Layout>
-            <Files />
-          </Layout>
-        )}
-      />
     </>
   );
 };
 
 export default App;
-
-

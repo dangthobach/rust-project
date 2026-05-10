@@ -110,12 +110,7 @@ pub async fn list_roles_paged(
 
     let items = sqlx::query_as::<_, RoleDto>(
         r#"
-        SELECT
-            r.id::text  AS id,
-            r.slug,
-            r.description,
-            CASE WHEN r.is_active THEN 1 ELSE 0 END AS is_active,
-            r.created_at::text AS created_at
+        SELECT r.id, r.slug, r.description, r.is_active, r.created_at
         FROM roles r
         WHERE ($1 = '' OR r.slug ILIKE '%' || $1 || '%')
         ORDER BY r.slug ASC
@@ -210,11 +205,7 @@ pub async fn list_permissions_paged(
 
     let items = sqlx::query_as::<_, PermissionDto>(
         r#"
-        SELECT
-            p.code,
-            p.description,
-            CASE WHEN p.is_active THEN 1 ELSE 0 END AS is_active,
-            p.created_at::text AS created_at
+        SELECT p.code, p.description, p.is_active, p.created_at
         FROM permissions p
         WHERE ($1 = '' OR p.code ILIKE '%' || $1 || '%')
         ORDER BY p.code ASC
@@ -349,19 +340,13 @@ pub async fn get_role(
 ) -> AppResult<Json<RoleDto>> {
     ctx.require(perm::ROLE_MANAGE)?;
 
+    let role_uuid = uuid::Uuid::parse_str(&role_id)
+        .map_err(|_| AppError::BadRequest("Invalid role id".into()))?;
+
     let row = sqlx::query_as::<_, RoleDto>(
-        r#"
-        SELECT
-            r.id::text AS id,
-            r.slug,
-            r.description,
-            CASE WHEN r.is_active THEN 1 ELSE 0 END AS is_active,
-            r.created_at::text AS created_at
-        FROM roles r
-        WHERE r.id = $1::uuid
-        "#,
+        "SELECT id, slug, description, is_active, created_at FROM roles WHERE id = $1",
     )
-    .bind(&role_id)
+    .bind(role_uuid)
     .fetch_optional(state.pool())
     .await?
     .ok_or_else(|| AppError::NotFound(format!("Role {role_id} not found")))?;

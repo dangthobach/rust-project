@@ -23,7 +23,11 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  extra: { skipAuthRedirect?: boolean } = {},
+): Promise<T> {
   const token = getAuthToken();
 
   const headers = new Headers(options.headers);
@@ -34,20 +38,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const errorData = response.ok ? null : await response.json().catch(() => ({}));
+  const errorMsg = (errorData as any)?.error || (errorData as any)?.message || 'Request failed';
 
   if (response.status === 401) {
-    clearAuth();
-    window.location.href = '/login';
-    throw new ApiError(401, 'Unauthorized');
+    if (!extra.skipAuthRedirect) {
+      clearAuth();
+      window.location.href = '/login';
+    }
+    throw new ApiError(401, errorMsg, errorData);
   }
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new ApiError(response.status, errorData.message || 'API request failed', errorData);
+    throw new ApiError(response.status, errorMsg, errorData);
   }
 
   if (response.status === 204) {
@@ -239,30 +243,33 @@ export const api = {
 
   // Auth
   login: async (email: string, password: string) => {
-    const data = await request<any>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
+    const data = await request<any>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ email, password }) },
+      { skipAuthRedirect: true },
+    );
     setAuth(data);
     return data;
   },
   logout: async (refreshToken?: string) => {
     try {
       if (refreshToken) {
-        await request<void>('/auth/logout', {
-          method: 'POST',
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
+        await request<void>(
+          '/auth/logout',
+          { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) },
+          { skipAuthRedirect: true },
+        );
       }
     } finally {
       clearAuth();
     }
   },
   refreshToken: async (refreshToken: string) => {
-    const data = await request<any>('/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
+    const data = await request<any>(
+      '/auth/refresh',
+      { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) },
+      { skipAuthRedirect: true },
+    );
     setAuth(data);
     return data;
   },
@@ -282,7 +289,7 @@ export const api = {
   searchClients: (params: any) => request<any>(`/clients/search?q=${params.search_term}`, { method: 'GET' }),
   searchUsersAdmin: (params: any) => request<any>(`/admin/users/search?q=${params.search}`, { method: 'GET' }),
   getClient: (id: string) => request<any>(`/clients/${id}`, { method: 'GET' }),
-  getUser: (id: string) => request<any>(`/api/users/${id}`, { method: 'GET' }),
+  getUser: (id: string) => request<any>(`/users/${id}`, { method: 'GET' }),
   completeTask: (id: string) => request<any>(`/tasks/${id}/complete`, { method: 'POST' }),
   updateTask: (id: string, data: any) => request<any>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTask: (id: string) => request<any>(`/tasks/${id}`, { method: 'DELETE' }),

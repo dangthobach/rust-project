@@ -17,7 +17,7 @@ const Login: Component = () => {
       await api.login(email(), password());
       navigate('/', { replace: true });
     } catch (err: any) {
-      setError(err.data?.message || err.message || 'Email hoặc mật khẩu không đúng');
+      setError(err.message || 'Email hoặc mật khẩu không đúng');
     } finally {
       setLoading(false);
     }
